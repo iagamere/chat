@@ -1,3 +1,13 @@
+# PS4 Download Monitor 6.1.0 (UI redesign, not compiled)
+
+## Theme system
+- `Theme.kt`: one token set (`AppTheme`) shared by 9 built-in presets, user profiles and game-generated themes; mapped to a Material colour scheme in `Root()` so every screen follows it. Modes: Game theme (dynamic), Preset, Custom, App default. Profiles are stored as JSON in the existing `app` SharedPreferences (`th_*` keys). Imported/exported themes are validated hex-by-hex and capped in size. Colours are pushed to readable contrast on save (`sanitize`).
+- Game theme: the cover (icon0.png) is sampled at 48x48 once per game with the existing `CoverPalette.analyze`, turned into background / surface / accent / second accent / text, and cached in memory.
+- `ThemeUi.kt`: Settings > Theme (mode, presets, profiles, editor with HEX + HSL sliders, live isolated preview, save / discard / restore preset values, duplicate, delete with confirmation, import / export).
+- Redesigned: Home dashboard, game page (hero, segmented tabs, account selector, trophy overview, trophy cards), shared Panel / bottom bar / download card. Other screens inherit colours, shapes and Panel through the theme but keep their layouts.
+- "Use phone colours" now defaults to off (it only applies in App default mode).
+- NOT compiled (no Android SDK here): only a parse-level check was run.
+
 # PS4 Download Monitor 6.0.0 (v6)
 
 ## 6.0.0 speed
@@ -327,3 +337,11 @@ artwork scan, history screen, auto-rename/auto-install, adoption toggle, "stop m
   setting "Alert me when a download is interrupted"); one grouped notification per finished download.
 - **Cover colours:** cards, progress bars and the detail screen take the dominant colour of the game's cover.
 - The custom server retries transient failures forever (only consecutive failures count), so downloads no longer stop and wait for "Resume".
+
+## Design DNA (v6.5)
+Each game cover is analysed offline (`CoverAnalyzer`) into a typed `DesignDna` (palette roles for light and dark, shape, ornament, texture, atmosphere, typography, motion, confidence, schema version). `DnaGenerator` is data-driven (no per-title branches); `DnaRules` enforces WCAG contrast (text ≥ 4.5:1, graphics ≥ 3:1). Appearance (system/light/dark) is independent of game identity (`LookResolver`). DNA and themes export/import as versioned, validated JSON (`DnaJson`); v1 profiles are migrated with a backup, and unreadable entries are quarantined, never deleted. Effects level (off / still / animated) is in Appearance settings; animation respects the system animator scale and battery saver.
+
+Not implemented: remote vision AI (would need your own backend; no key is embedded). Analysis uses the icon0 cover only.
+
+## Build
+No Gradle wrapper is committed. CI (`.github/workflows/android.yml`) runs unit tests and `assembleDebug`, then uploads `PS4Monitor-debug.apk`, `build-logs` and `test-reports`. Locally: Gradle 8.9 + Android SDK 34, `gradle testDebugUnitTest assembleDebug`.
