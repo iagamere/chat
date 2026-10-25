@@ -198,7 +198,7 @@ private fun modeHint(m: ThemeMode) = when (m) {
                     Dim(tr("Light / dark applies to every theme and every game: it never changes which theme or game identity is used.", "الفاتح/الداكن يُطبَّق على كل الثيمات والألعاب ولا يغيّر الثيم أو هوية اللعبة المستخدمة."))
                     SectionTitle(tr("Decoration", "الزخرفة"))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(tr("Off", "إيقاف"), tr("Still", "ثابتة"), tr("Animated", "متحركة")).forEachIndexed { i, t -> FilterChip(ThemeEngine.fx == i, { ThemeEngine.setFx(i) }, label = { Lbl(t) }) }
+                        listOf(tr("Off", "إيقاف"), tr("Still", "ثابتة"), tr("Animated", "متحركة")).forEachIndexed { i, t -> FilterChip(ThemeEngine.fx == i, { ThemeEngine.chooseFx(i) }, label = { Lbl(t) }) }
                     }
                     Dim(tr("Ornaments, textures, light and particles. Motion stops by itself when system animations are off or battery saver is on.", "الزخارف والخامات والإضاءة والجسيمات. تتوقف الحركة تلقائيًا عند إيقاف رسوم النظام أو تفعيل توفير البطارية."))
                 }

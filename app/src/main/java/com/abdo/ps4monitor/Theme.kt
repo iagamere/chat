@@ -62,7 +62,7 @@ object ThemeEngine {
     fun selectPreset(id: String) { if (preset(id) == null) return; presetId = id; chooseMode(ThemeMode.PRESET); sp().edit().putString("th_preset", id).apply() }
     fun selectProfile(id: String) { if (profiles.none { it.id == id }) return; activeProfileId = id; chooseMode(ThemeMode.CUSTOM); sp().edit().putString("th_profile", id).apply() }
     fun setGameAccents(b: Boolean) { applyGameAccents = b; sp().edit().putBoolean("th_gameaccent", b).apply() }
-    fun setFx(level: Int) { fx = level.coerceIn(0, 2); sp().edit().putInt("fx", fx).apply() }
+    fun chooseFx(level: Int) { fx = level.coerceIn(0, 2); sp().edit().putInt("fx", fx).apply() }
     fun resetToDefault() { presetId = "default"; chooseMode(ThemeMode.DEFAULT); sp().edit().putString("th_preset", "default").apply() }
 
     // ------------------------------------------------------------------ profiles
