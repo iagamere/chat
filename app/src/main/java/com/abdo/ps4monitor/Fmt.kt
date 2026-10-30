@@ -26,6 +26,12 @@ object Fmt {
         val mul = when (m.groupValues[2].uppercase()) { "KB" -> 1L shl 10; "MB" -> 1L shl 20; "TB" -> 1L shl 40; else -> 1L shl 30 }
         return (n * mul).toLong()
     }
-    fun time(ms: Long): String = java.text.SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date(ms))
-    fun dt(ms: Long): String = if (ms <= 0) "—" else java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(java.util.Date(ms))
+    // one formatter per thread (building a SimpleDateFormat for every list row is slow); the time zone is re-read in case the phone's changed
+    private val timeFmt = object : ThreadLocal<java.text.SimpleDateFormat>() { override fun initialValue() = java.text.SimpleDateFormat("HH:mm", Locale.US) }
+    private val dtFmt = object : ThreadLocal<java.text.SimpleDateFormat>() { override fun initialValue() = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US) }
+    private fun fmt(f: ThreadLocal<java.text.SimpleDateFormat>, ms: Long): String {
+        val x = f.get()!!; x.timeZone = java.util.TimeZone.getDefault(); return x.format(java.util.Date(ms))
+    }
+    fun time(ms: Long): String = fmt(timeFmt, ms)
+    fun dt(ms: Long): String = if (ms <= 0) "—" else fmt(dtFmt, ms)
 }

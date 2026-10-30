@@ -115,7 +115,7 @@ object Ps4Info {
 
     /** Installed titles: folder names of /user/app (or /user/appmeta), enriched from each title's param.sfo when the console lets us read it. */
     fun scanGames(ps4: Ps4, limit: Int = 300, force: Boolean = false, progress: (Int, Int) -> Unit = { _, _ -> }): Pair<List<GameInfo>, List<String>> {
-        gamesCache[ps4.id]?.let { (t, r) -> if (!force && System.currentTimeMillis() - t < 60_000L) { progress(r.first.size, r.first.size); names = r.first.associate { it.titleId to it.title }; return r } }
+        gamesCache[ps4.id]?.let { (t, r) -> if (!force && System.currentTimeMillis() - t < 600_000L) { progress(r.first.size, r.first.size); names = r.first.associate { it.titleId to it.title }; return r } }
         val notes = ArrayList<String>(); var ids: List<String> = emptyList()
         for (d in GAME_DIRS) {
             val l = listOrNote(ps4, d, notes) ?: continue
@@ -223,6 +223,7 @@ object Thumbs {
     private val cache = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 8).toInt().coerceAtLeast(8 shl 20)) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
+    private const val DISK_MAX = 1280
     private val gate = Semaphore(3)
     private val videoGate = Semaphore(1)
     const val MAX_READ = 64L shl 20
@@ -272,7 +273,7 @@ object Thumbs {
         val k = key(ps4, path, maxSide)
         cache.get(k)?.let { return@withContext it }
         val dk = "${ps4.id}|$path|$size|$maxSide"
-        if (maxSide <= 512) diskGet(dk)?.let { cache.put(k, it); return@withContext it }
+        if (maxSide <= DISK_MAX) diskGet(dk)?.let { cache.put(k, it); return@withContext it }
         gate.withPermit {
             cache.get(k) ?: try {
                 val sz = if (size > 0) size else Ps4Server.fsSize(ps4, path, 6000)
@@ -281,7 +282,7 @@ object Thumbs {
                 else {
                     val bmp = decode(Ps4Server.fsRead(ps4, path, 0, sz.toInt(), 30_000), maxSide)
                     if (bmp == null) { lastError = tr("Not a readable image", "ليست صورة قابلة للقراءة"); null }
-                    else { cache.put(k, bmp); if (maxSide <= 512) diskPut(dk, bmp); bmp }
+                    else { cache.put(k, bmp); if (maxSide <= DISK_MAX) diskPut(dk, bmp); bmp }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { lastError = e.message ?: e.javaClass.simpleName; null }
         }

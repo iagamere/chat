@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -26,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -65,21 +65,16 @@ import kotlinx.coroutines.withContext
 @Composable private fun GameCard(ps4: Ps4, g: GameInfo, onClick: () -> Unit) {
     val paths = remember(g.titleId, g.metaDir) { Ps4Info.art(g, "icon0.png") }
     val icon by produceState<Bitmap?>(Thumbs.peekAny(ps4, paths, 256), g.titleId) { if (value == null) value = Thumbs.loadAny(ps4, paths, 256) }
-    // each card carries a hint of its own game's identity: shape family and an accent edge (analysis is cached and runs off the main thread)
-    val dna by rememberGameDna(g.titleId, g.title, if (ThemeEngine.mode == ThemeMode.DYNAMIC) icon else null)
-    val look = ThemeEngine.gameLook(dna, LookResolver.isDark(Store.theme.intValue, androidx.compose.foundation.isSystemInDarkTheme()))
-    val cardShape = shapeFor(look.style.shape, 14f)
-    Column(Modifier.clip(cardShape).background(MaterialTheme.colorScheme.surfaceContainerLow).clickable(onClick = onClick)) {
+    Column(Modifier.dnaCard(14, fill = SolidColor(MaterialTheme.colorScheme.surfaceContainerLow)).clickable(onClick = onClick)) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
             val b = icon
             if (b != null) Image(b.asImageBitmap(), g.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             else Ico(R.drawable.ic_package, 36.dp, MaterialTheme.colorScheme.outline)
             val cat = Ps4Info.categoryLabel(g.category)
-            if (g.category == "gp" || g.category == "ac") Surface(Modifier.align(Alignment.TopStart).padding(6.dp), shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.tertiaryContainer) {
+            if (g.category == "gp" || g.category == "ac") Surface(Modifier.align(Alignment.TopStart).padding(6.dp), shape = dnaShape(6), color = MaterialTheme.colorScheme.tertiaryContainer) {
                 Text(cat, Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
             }
         }
-        if (ThemeEngine.mode == ThemeMode.DYNAMIC && dna != null) Box(Modifier.fillMaxWidth().height(3.dp).background(Brush.horizontalGradient(listOf(Color(look.scheme.primary), Color(look.scheme.secondary)))))
         Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
             Text(g.title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
             Dim(listOfNotNull(g.version.takeIf { it.isNotBlank() }?.let { "v$it" }, g.titleId).joinToString("  •  "), maxLines = 1)
@@ -92,6 +87,45 @@ import kotlinx.coroutines.withContext
         Text(label, Modifier.weight(0.38f), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         Text(value, Modifier.weight(0.62f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
     }
+}
+
+/**
+ * The game's artwork (banner + cover) -> a complete design (colours for both appearances + shape / border / divider / texture / ornament /
+ * typography / composition layers). Analysed locally and off the main thread; reused from the cache while the artwork is unchanged.
+ */
+@Composable private fun rememberGameTheme(titleId: String, title: String, icon: Bitmap?, banner: Bitmap?): AppTheme? {
+    val online = ThemeEngine.onlineGenre
+    val t by produceState<AppTheme?>(ThemeEngine.cachedGame(titleId), titleId, icon, banner, online) {
+        if (icon == null && banner == null) return@produceState
+        val built = withContext(Dispatchers.Default) {
+            runCatching {
+                val rs = ArrayList<Raster>(); val ws = ArrayList<Float>()
+                fun add(b: Bitmap?, w: Float) {
+                    if (b == null || b.width < 4 || b.height < 4) return
+                    val s = 192f / maxOf(b.width, b.height)
+                    val sm = if (s < 1f) Bitmap.createScaledBitmap(b, maxOf(1, (b.width * s).toInt()), maxOf(1, (b.height * s).toInt()), true) else b
+                    val px = IntArray(sm.width * sm.height); sm.getPixels(px, 0, sm.width, 0, 0, sm.width, sm.height)
+                    for (i in px.indices) px[i] = if ((px[i] ushr 24) < 128) 0xFF808080.toInt() else px[i] or (0xFF shl 24)
+                    rs.add(Raster(sm.width, sm.height, px)); ws.add(w)
+                }
+                add(banner, 0.6f); add(icon, 0.4f)
+                if (rs.isEmpty()) null else Triple(rs, ws, ArtAnalyzer.fingerprint(rs))
+            }.getOrNull()
+        } ?: return@produceState
+        fun design(tags: Map<Tag, Float>): AppTheme? = runCatching {
+            val fp = built.third xor (GenreClassifier.key(tags) * 31L)
+            ThemeEngine.generatedFor(titleId, fp) ?: ThemeEngine.storeGenerated(titleId, fp, DnaGenerator.generate(ArtAnalyzer.analyze(built.first, built.second), tags))
+        }.getOrNull()
+        val local = GameGenre.local(title)
+        val known = GameWebInfo.tags(titleId)
+        value = withContext(Dispatchers.Default) { design(GenreClassifier.merge(local, known ?: emptyMap())) }
+        if (known == null && online) {
+            // one online lookup serves the About section and the game type; the design is refined when the type arrives
+            val fetched = GenreClassifier.decode(GameWebInfo.fetch(titleId, title, if (Lang.isAr) "ar" else "en").facts?.tags)
+            if (fetched.isNotEmpty()) value = withContext(Dispatchers.Default) { design(GenreClassifier.merge(local, fetched)) } ?: value
+        }
+    }
+    return t
 }
 
 /** Details of one game: cinematic hero (pic1/pic0 artwork), cover, name, segmented tabs, then the tab content. Colours follow the theme mode. */
@@ -114,48 +148,60 @@ import kotlinx.coroutines.withContext
     }
     var tab by rememberSaveable(g.titleId) { mutableIntStateOf(0) }
     val screenH = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp
-    // identity: Dynamic mode = the game's own DNA; Preset / Custom = the saved theme (optionally with the game's accents); App default = the app look.
-    // The appearance (system / light / dark) is applied on top, whatever the identity is.
-    val dna by rememberGameDna(g.titleId, g.title, icon)
-    val dark = LookResolver.isDark(Store.theme.intValue, androidx.compose.foundation.isSystemInDarkTheme())
-    val look = ThemeEngine.gameLook(dna, dark)
-    val inherited = if (ThemeEngine.mode == ThemeMode.DEFAULT) MaterialTheme.colorScheme else null      // app default keeps exactly the app's own colours (incl. phone colours)
-    DnaTheme(look, ThemeEngine.fx, inherited) {
-        val cs = MaterialTheme.colorScheme
-        val sheetBg by animateColorAsState(cs.surface, tween(350), label = "gameBg")
+    // theme: a theme assigned to this game wins; Dynamic mode = the game's own; Preset / Custom = the saved theme (optionally with the game's accents);
+    // App default = the app's current scheme. The appearance (light / dark / system) is applied on top of whichever theme this is.
+    val gameTheme = rememberGameTheme(g.titleId, g.title, icon, banner)
+    val assigned = ThemeEngine.assignedTheme(g.titleId)
+    val dark = appDark()
+    val shown = if (ThemeEngine.mode == ThemeMode.DEFAULT && assigned == null) null else ThemeEngine.resolve(ThemeEngine.forGame(gameTheme, g.titleId), dark)
+    // remembered: the colour animation below recomposes this function on every frame for 350 ms; a NEW scheme / tokens / dna object each time
+    // made the whole sheet (about text, captures grid, trophies) recompose on every one of those frames
+    val decoration = ThemeEngine.decoration
+    val appCs = MaterialTheme.colorScheme; val appDna = LocalDna.current; val appTokens = LocalTokens.current
+    val cs = if (shown == null) appCs else remember(shown) { ThemeEngine.scheme(shown) }
+    val dna = if (shown == null) appDna else remember(shown, decoration) { shown.dna.restrained(decoration) }
+    val tokens = if (shown == null) appTokens else remember(shown) { ThemeEngine.tokens(shown) }
+    val sheetBg by animateColorAsState(cs.surface, tween(350), label = "gameBg")
+    CompositionLocalProvider(LocalDna provides dna, LocalTokens provides tokens) { MaterialTheme(colorScheme = cs, typography = dnaTypography(dna), shapes = dnaShapes(dna)) {
         ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = sheetBg, contentColor = cs.onSurface, dragHandle = null, scrimColor = Color.Black.copy(alpha = 0.6f)) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.dnaTexture(dna, cs.onSurface, cs.primary).verticalScroll(rememberScrollState()).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy((14 * dna.spacing).dp)) {
                 GameHero(g, icon, banner) 
                 Box(Modifier.padding(horizontal = 16.dp)) { SegmentedTabs(listOf(tr("Details", "التفاصيل"), tr("Captures", "اللقطات"), tr("Trophies", "الإنجازات")), tab) { tab = it } }
                 if (tab == 1) Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(screenH * 0.7f)) { CapturesTab(ps4, 0, g.titleId) }
                 if (tab == 2) Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth()) { TrophiesTab(ps4, g) }
                 if (tab == 0) Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Panel { rows.forEach { (k, v) -> InfoRow(k, v) } }
-                    DnaInfoPanel(g, dna)
-                    FilledTonalButton(onClick = { clip.setText(AnnotatedString(g.titleId)); Toast.makeText(ctx, tr("Copied", "تم النسخ"), Toast.LENGTH_SHORT).show() }) {
+                    GameAbout(g.titleId, g.title)
+                    DnaSurface { rows.forEachIndexed { i, (k, v) -> if (i > 0) DnaRule(Modifier.fillMaxWidth(), subtle = true); InfoRow(k, v) } }
+                    GameThemePicker(g.titleId, g.title, gameTheme)
+                    FilledTonalButton(shape = dnaShape(14), onClick = { clip.setText(AnnotatedString(g.titleId)); Toast.makeText(ctx, tr("Copied", "تم النسخ"), Toast.LENGTH_SHORT).show() }) {
                         Ico(R.drawable.ic_copy, 18.dp); Spacer(Modifier.width(6.dp)); Lbl(tr("Copy title ID", "نسخ معرّف اللعبة"))
                     }
                     if (DeletePolicy.isGameId(g.titleId)) DeleteGameSection(ps4, g, onDeleted, onClose)
                 }
             }
         }
-    }
+    } }
 }
 
-/** Edge-to-edge artwork fading into the page, with the cover and title on top. Missing artwork falls back to a themed gradient. */
+/**
+ * The top of the game page. The DNA decides the composition: FADE = edge-to-edge artwork fading into the page with the cover and title on top;
+ * FRAMED = artwork inside a ruled frame under an accent band, the cover overlapping its lower edge and the title on the page below it.
+ * Missing artwork falls back to a themed gradient. Ornaments (leaves, spores, light shafts, brush stroke ...) come from the DNA.
+ */
 @Composable private fun GameHero(g: GameInfo, icon: Bitmap?, banner: Bitmap?) {
-    val cs = MaterialTheme.colorScheme
+    val cs = MaterialTheme.colorScheme; val d = LocalDna.current
+    if (d.hero == HeroKind.FRAMED) { GameHeroFramed(g, icon, banner); return }
+    val coverShape = dnaShape(18)
     Box(Modifier.fillMaxWidth().height(250.dp)) {
         val bn = banner
         if (bn != null) Image(bn.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(cs.primaryContainer, cs.surfaceContainer, cs.surface))))
         Box(Modifier.matchParentSize().background(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.35f), 0.35f to Color.Transparent, 0.75f to cs.surface.copy(alpha = 0.85f), 1f to cs.surface)))
         Box(Modifier.matchParentSize().background(Brush.horizontalGradient(0f to Color.Black.copy(alpha = 0.25f), 0.25f to Color.Transparent, 0.75f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.25f))))
-        DnaAtmosphere(Modifier.matchParentSize())
-        val iconShape = dnaShape(18f)
+        Box(Modifier.matchParentSize().dnaOrnaments(d, cs.primary))
         Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
-            Box(Modifier.size(104.dp).shadow(12.dp, iconShape).clip(iconShape).background(cs.surfaceContainerHighest).border(1.dp, cs.primary.copy(alpha = 0.5f), iconShape), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(104.dp).shadow(12.dp, coverShape).clip(coverShape).background(cs.surfaceContainerHighest).dnaBorder(d, cs.primary.copy(alpha = 0.5f), cs.primary, coverShape), contentAlignment = Alignment.Center) {
                 val ic = icon
                 if (ic != null) Image(ic.asImageBitmap(), g.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 else Ico(R.drawable.ic_package, 36.dp, cs.outline)
@@ -168,26 +214,31 @@ import kotlinx.coroutines.withContext
     }
 }
 
-/** Segmented tab control: the selected segment is tinted with the active accent. Same behaviour as before (index in, index out). */
-@Composable fun SegmentedTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val outer = dnaShape(16f); val inner = dnaShape(12f)
-    Row(Modifier.fillMaxWidth().dnaSurface(outer).padding(4.dp)) {
-        labels.forEachIndexed { i, t ->
-            val on = i == selected
-            val bg by animateColorAsState(if (on) cs.primary.copy(alpha = 0.20f) else Color.Transparent, tween(180), label = "tab")
-            Box(Modifier.weight(1f).heightIn(min = 44.dp).clip(inner).background(bg).clickable { onSelect(i) }.padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
-                Lbl(t, color = if (on) cs.primary else cs.onSurfaceVariant, weight = if (on) FontWeight.SemiBold else FontWeight.Medium, style = MaterialTheme.typography.titleSmall)
+@Composable private fun GameHeroFramed(g: GameInfo, icon: Bitmap?, banner: Bitmap?) {
+    val cs = MaterialTheme.colorScheme; val d = LocalDna.current
+    val frame = dnaShape(6); val coverShape = dnaShape(10)
+    Column(Modifier.fillMaxWidth().background(cs.surfaceContainer)) {
+        Box(Modifier.fillMaxWidth().height(6.dp).background(cs.primary))
+        Box(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 14.dp).height(160.dp).clip(frame)) {
+            val bn = banner
+            if (bn != null) Image(bn.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(cs.primaryContainer, cs.surfaceContainerHigh, cs.surface))))
+            Box(Modifier.matchParentSize().dnaOrnaments(d, cs.primary, OrnamentKind.values().toSet() - OrnamentKind.BRUSH_SWEEP))
+            Box(Modifier.matchParentSize().dnaBorder(d, cs.outline, cs.primary, frame))
+        }
+        Box(Modifier.fillMaxWidth().heightIn(min = 100.dp).dnaOrnaments(d, cs.primary, setOf(OrnamentKind.BRUSH_SWEEP))) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).offset(y = (-30).dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+                Box(Modifier.size(96.dp).shadow(6.dp, coverShape).clip(coverShape).background(cs.surfaceContainerHighest).dnaBorder(d, cs.outline, cs.primary, coverShape), contentAlignment = Alignment.Center) {
+                    val ic = icon
+                    if (ic != null) Image(ic.asImageBitmap(), g.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    else Ico(R.drawable.ic_package, 36.dp, cs.outline)
+                }
+                Column(Modifier.weight(1f).padding(top = 34.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(g.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Dim(listOfNotNull(g.titleId, g.version.takeIf { it.isNotBlank() }?.let { "v$it" }).joinToString("  •  "), maxLines = 1)
+                }
             }
         }
-    }
-}
-
-/** Section title with a fading rule, used between blocks of the game page. */
-@Composable fun SectionHeader(t: String) {
-    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(t, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        DnaDivider(Modifier.weight(1f))
     }
 }
 
@@ -246,44 +297,5 @@ import kotlinx.coroutines.withContext
             text = { Text(r.message + if (r.ok) "\n\n" + tr("If the icon is still on the PS4 home screen, press Options > Delete on it there to clear it.",
                 "إن بقيت الأيقونة في الشاشة الرئيسية للـPS4 فاضغط عليها Options ← Delete لإزالتها.") else "") },
             confirmButton = { TextButton(onClick = { result = null; if (r.ok) { onDeleted(g.titleId); onClose() } }) { Lbl("OK") } })
-    }
-}
-
-
-/**
- * "Design DNA" of the game: its palette in the current appearance, the style it was given and how sure the analysis is, with export /
- * import. An imported DNA is pinned to this game and used instead of the generated one until it is removed.
- */
-@Composable private fun DnaInfoPanel(g: GameInfo, dna: DesignDna?) {
-    val ctx = LocalContext.current; val clip = LocalClipboardManager.current
-    val look = LocalLook.current
-    var importing by remember { mutableStateOf(false) }
-    val pinned = remember(GameDna.version, g.titleId) { GameDna.pinned(g.titleId) != null }
-    Panel {
-        SectionTitle(tr("Design DNA", "الهوية البصرية"))
-        if (dna == null) { Dim(tr("Waiting for the cover…", "بانتظار صورة الغلاف…")); return@Panel }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            val s = dna.scheme(look.dark)
-            listOf(s.bg, s.card, s.primary, s.secondary, s.text).forEach { Box(Modifier.size(22.dp).clip(CircleShape).background(Color(it)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)) }
-        }
-        val (en, ar) = DnaStyles.label(dna.style.id)
-        Dim(tr("Style: $en", "النمط: $ar") + "  •  " + tr("confidence", "الثقة") + " ${(dna.confidence * 100).toInt()}%" + if (pinned) "  •  " + tr("imported", "مستورد") else "")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { clip.setText(AnnotatedString(DnaJson.toJson(dna, pretty = true))); Toast.makeText(ctx, tr("Design DNA copied", "تم نسخ الهوية"), Toast.LENGTH_SHORT).show() }) { Lbl(tr("Copy DNA", "نسخ الهوية")) }
-            OutlinedButton(onClick = { importing = true }) { Lbl(tr("Import DNA", "استيراد هوية")) }
-            if (pinned) TextButton(onClick = { GameDna.unpin(g.titleId) }) { Lbl(tr("Use generated", "استخدام المولَّدة")) }
-        }
-    }
-    if (importing) {
-        var txt by remember { mutableStateOf("") }; var err by remember { mutableStateOf<String?>(null) }
-        AlertDialog(onDismissRequest = { importing = false }, title = { Text(tr("Import design DNA", "استيراد هوية بصرية")) },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(txt, { txt = it; err = null }, Modifier.fillMaxWidth(), minLines = 4, maxLines = 8, isError = err != null, label = { Text(tr("Paste the DNA", "الصق الهوية")) })
-                err?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            } },
-            confirmButton = { TextButton(onClick = {
-                when (val r = DnaJson.parseDna(txt)) { is Parsed.Err -> err = r.reason; is Parsed.Ok -> { GameDna.pin(g.titleId, r.value); importing = false } }
-            }) { Lbl(tr("Import", "استيراد")) } },
-            dismissButton = { TextButton(onClick = { importing = false }) { Lbl(tr("Cancel", "إلغاء")) } })
     }
 }

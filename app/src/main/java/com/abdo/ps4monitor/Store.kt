@@ -85,9 +85,20 @@ object DownloadRepo {
     fun remove(id: String) { all.update { l -> l.filter { it.id != id } }; flush(true) }
     fun update(id: String, f: (Download) -> Download) {
         var structural = false
-        all.update { l -> l.map { if (it.id == id) { val n = f(it).copy(updatedAt = System.currentTimeMillis())
-            structural = n.state != it.state || n.terminalNotified != it.terminalNotified || n.pkgTitle != it.pkgTitle || n.superseded != it.superseded || n.powerOff != it.powerOff
-            n } else it } }
+        all.update { l ->
+            structural = false
+            l.map {
+                if (it.id != id) it else {
+                    val changed = f(it)
+                    // nothing changed (a paused / waiting download polled again): keep the same object, so the list stays equal and no screen recomposes
+                    if (changed == it) it else {
+                        val n = changed.copy(updatedAt = System.currentTimeMillis())
+                        structural = n.state != it.state || n.terminalNotified != it.terminalNotified || n.pkgTitle != it.pkgTitle || n.superseded != it.superseded || n.powerOff != it.powerOff
+                        n
+                    }
+                }
+            }
+        }
         flush(structural)        // byte counters are written at most every 10 s
     }
     fun flush(force: Boolean) {

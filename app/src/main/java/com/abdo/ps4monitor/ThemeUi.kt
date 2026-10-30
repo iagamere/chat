@@ -5,6 +5,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -41,86 +43,89 @@ private fun modeHint(m: ThemeMode) = when (m) {
     ThemeMode.DYNAMIC -> tr("Each game page takes its colours from the game's artwork. Other screens use the app default.", "تأخذ كل صفحة لعبة ألوانها من صورة اللعبة. باقي الشاشات تستخدم الافتراضي.")
     ThemeMode.PRESET -> tr("The chosen preset is used on every screen, including every game.", "يُستخدم الثيم الجاهز المختار في كل الشاشات وكل الألعاب.")
     ThemeMode.CUSTOM -> tr("Your own colour profile is used on every screen.", "يُستخدم ملفك اللوني في كل الشاشات.")
-    ThemeMode.DEFAULT -> tr("The standard PS4 Monitor look (phone colours are available under Settings > Appearance).", "المظهر القياسي للتطبيق (ألوان الهاتف متاحة ضمن الإعدادات ← المظهر).")
+    ThemeMode.DEFAULT -> tr("The standard PS4 Monitor look (Light / Dark / phone colours stay available under Appearance).", "المظهر القياسي للتطبيق (الفاتح/الداكن/ألوان الهاتف متاحة ضمن «المظهر»).")
 }
 
 /**
- * Isolated sample screen: it only reads [t] (in the given appearance) and never real data or the saved theme. It is drawn with the real
- * design-system primitives, so shape family, borders, separators and ornaments of the theme's style are visible here.
+ * Isolated sample screen: it only reads [t] (already resolved to one appearance), never real data, and never touches the saved theme.
+ * It is built with the same DNA components as the real pages, so the corners, borders, dividers, tabs, progress and typography shown here are the real ones.
  */
-@Composable fun ThemePreview(t: AppTheme, dark: Boolean, modifier: Modifier = Modifier) {
-    val look = remember(t, dark) { Look(dark, ThemeCore.schemeOf(t, dark), t.style, DnaHash.seed(t.id), null) }
-    DnaTheme(look, ThemeEngine.fx) {
-        val cs = MaterialTheme.colorScheme; val k = LocalTokens.current
-        val shape = dnaShape(20f)
-        Box(modifier.fillMaxWidth().clip(shape).background(Brush.verticalGradient(listOf(cs.surfaceContainer, cs.surface))).border(1.dp, cs.outlineVariant, shape)) {
-            DnaAtmosphere(Modifier.matchParentSize(), 0.7f)
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+@Composable fun ThemePreview(t: AppTheme, modifier: Modifier = Modifier) {
+    val k = ThemeEngine.tokens(t); val dna = t.dna.restrained(ThemeEngine.decoration)
+    CompositionLocalProvider(LocalTokens provides k, LocalDna provides dna) {
+        MaterialTheme(colorScheme = ThemeEngine.scheme(t), typography = dnaTypography(dna), shapes = dnaShapes(dna)) {
+            val shape = dnaShape(20)
+            Column(modifier.fillMaxWidth().clip(shape).background(Brush.verticalGradient(listOf(k.bg2, k.bg))).dnaTexture(dna, k.text, k.accent).dnaBorder(dna, k.border, k.accent, shape)
+                .padding((14 * dna.spacing).dp), verticalArrangement = Arrangement.spacedBy((10 * dna.spacing).dp)) {
                 Column {
-                    Text(tr("Sample Game", "لعبة تجريبية"), color = cs.onSurface, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                    Text("CUSA00000  •  v01.00", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text(tr("Sample Game", "لعبة تجريبية"), color = k.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("CUSA00000  •  v01.00", color = k.text2, style = MaterialTheme.typography.bodySmall)
                 }
-                DnaDivider()
-                val tabShape = dnaShape(14f); val tabIn = dnaShape(11f)
-                Row(Modifier.fillMaxWidth().dnaSurface(tabShape).padding(4.dp)) {
-                    listOf(tr("Details", "التفاصيل"), tr("Captures", "اللقطات"), tr("Trophies", "الإنجازات")).forEachIndexed { i, s ->
-                        Box(Modifier.weight(1f).clip(tabIn).background(if (i == 2) cs.primary.copy(alpha = 0.20f) else Color.Transparent).padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                            Lbl(s, color = if (i == 2) cs.primary else cs.onSurfaceVariant, weight = if (i == 2) FontWeight.SemiBold else FontWeight.Normal, style = MaterialTheme.typography.labelLarge)
-                        }
-                    }
-                }
+                SegmentedTabs(listOf(tr("Details", "التفاصيل"), tr("Captures", "اللقطات"), tr("Trophies", "الإنجازات")), 2) { }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     listOf("Ali" to 0, "Sara" to 54, "Omar" to 12).forEach { (n, pct) ->
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
-                                val track = cs.outlineVariant; val ring = if (pct == 54) cs.primary else cs.secondary
                                 Canvas(Modifier.matchParentSize()) {
                                     val w = 4.dp.toPx(); val sz = Size(size.width - w, size.height - w)
-                                    drawArc(track, 0f, 360f, false, Offset(w / 2, w / 2), sz, style = Stroke(w))
-                                    if (pct > 0) drawArc(ring, -90f, 360f * pct / 100f, false, Offset(w / 2, w / 2), sz, style = Stroke(w, cap = StrokeCap.Round))
+                                    drawArc(k.border, 0f, 360f, false, Offset(w / 2, w / 2), sz, style = Stroke(w))
+                                    if (pct > 0) drawArc(if (pct == 54) k.accent else k.accent2, -90f, 360f * pct / 100f, false, Offset(w / 2, w / 2), sz, style = Stroke(w, cap = StrokeCap.Round))
                                 }
-                                Box(Modifier.size(34.dp).clip(CircleShape).background(cs.surfaceContainerHigh), contentAlignment = Alignment.Center) { Text(n.take(1), color = cs.onSurface, fontWeight = FontWeight.Bold) }
+                                Box(Modifier.size(34.dp).clip(CircleShape).background(k.surface), contentAlignment = Alignment.Center) { Text(n.take(1), color = k.text, fontWeight = FontWeight.Bold) }
                             }
-                            Text(n, color = if (pct == 54) cs.primary else cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                            Text(n, color = if (pct == 54) k.accent else k.text2, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
-                Column(Modifier.fillMaxWidth().dnaSurface(dnaShape(16f)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DnaSurface(radius = 16, raised = true, padding = 12.dp) {
                     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("54%", color = cs.onSurface, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
-                        Text(tr("19 of 35 trophies", "19 من 35 إنجازًا"), color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 3.dp))
+                        Text("54%", color = k.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
+                        Text(tr("19 of 35 trophies", "19 من 35 إنجازًا"), color = k.text2, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 3.dp))
                     }
-                    Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(cs.outlineVariant)) { Box(Modifier.fillMaxWidth(0.54f).fillMaxHeight().background(k.progress)) }
+                    DnaProgress(0.54f)
+                    DnaRule(Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        listOf(Color(0xFF7FB2E5) to "0/1", Color(0xFFE2B33C) to "1/5", Color(0xFFB4BCC6) to "3/11", Color(0xFFC07A3E) to "15/18").forEach { (c, s) ->
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(Modifier.size(9.dp).clip(CircleShape).background(c)); Text(s, color = k.text, style = MaterialTheme.typography.labelMedium) }
+                        }
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.clip(dnaShape(12f)).background(cs.primary).padding(horizontal = 16.dp, vertical = 9.dp)) { Lbl(tr("Refresh", "تحديث"), color = cs.onPrimary, weight = FontWeight.SemiBold) }
-                    Box(Modifier.clip(dnaShape(12f)).border(1.dp, cs.secondary, dnaShape(12f)).padding(horizontal = 16.dp, vertical = 9.dp)) { Lbl(tr("Wake PS4", "إيقاظ"), color = cs.secondary) }
+                    Box(Modifier.clip(dnaShape(12)).background(k.accent).padding(horizontal = 16.dp, vertical = 9.dp)) { Lbl(tr("Refresh", "تحديث"), color = k.onAccent, weight = FontWeight.SemiBold) }
+                    Box(Modifier.clip(dnaShape(12)).border(1.dp, k.accent2, dnaShape(12)).padding(horizontal = 16.dp, vertical = 9.dp)) { Lbl(tr("Wake PS4", "إيقاظ"), color = k.accent2) }
                 }
             }
         }
     }
 }
 
-@Composable private fun Swatches(t: AppTheme, dark: Boolean, size: Int = 14) {
-    val s = remember(t, dark) { ThemeCore.schemeOf(t, dark) }
-    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        listOf(s.bg, s.card, s.primary, s.secondary, s.text).forEach { Box(Modifier.size(size.dp).clip(CircleShape).background(Color(it)).border(0.5.dp, Color.Gray.copy(alpha = 0.5f), CircleShape)) }
+/** One independent design layer as a row of chips (corners, border, divider ...). Picking a value changes only that layer. */
+@Composable private fun <E : Enum<E>> LayerRow(label: String, values: Array<E>, cur: E, on: (E) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            values.forEach { v -> FilterChip(v == cur, { on(v) }, label = { Lbl(v.name.lowercase().replace('_', ' ')) }) }
+        }
     }
 }
 
-@Composable private fun ThemeCard(t: AppTheme, dark: Boolean, active: Boolean, shown: Boolean, onClick: () -> Unit) {
-    val s = remember(t, dark) { ThemeCore.schemeOf(t, dark) }
-    val shape = RoundedCornerShape(16.dp)
-    Column(Modifier.width(132.dp).clip(shape).background(Brush.verticalGradient(listOf(Color(s.bg2), Color(s.bg)))).border(if (shown) 2.dp else 1.dp, if (shown) Color(s.primary) else Color(s.outlineVariant), shape)
+@Composable private fun Swatches(t: AppTheme, size: Int = 14) = Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+    listOf(t.bg, t.surface, t.accent, t.accent2, t.text).forEach { Box(Modifier.size(size.dp).clip(CircleShape).background(Color(it)).border(0.5.dp, Color.White.copy(alpha = 0.25f), CircleShape)) }
+}
+
+@Composable private fun ThemeCard(t: AppTheme, active: Boolean, shown: Boolean, onClick: () -> Unit) {
+    val k = ThemeEngine.tokens(t); val shape = shapeOf(t.dna, 16)
+    Column(Modifier.width(132.dp).clip(shape).background(Brush.verticalGradient(listOf(k.bg2, k.bg))).border(if (shown) 2.dp else 1.dp, if (shown) k.accent else k.border, shape)
         .clickable(onClick = onClick).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.fillMaxWidth().height(34.dp).clip(RoundedCornerShape(8.dp)).background(Color(s.card))) {
-            Box(Modifier.padding(6.dp).fillMaxWidth(0.55f).height(5.dp).clip(CircleShape).background(Color(s.primary)))
-            Box(Modifier.align(Alignment.BottomStart).padding(6.dp).fillMaxWidth(0.3f).height(5.dp).clip(CircleShape).background(Color(s.secondary)))
+        Box(Modifier.fillMaxWidth().height(34.dp).clip(shapeOf(t.dna, 8)).background(k.surface)) {
+            Box(Modifier.padding(6.dp).fillMaxWidth(0.55f).height(5.dp).clip(CircleShape).background(k.accent))
+            Box(Modifier.align(Alignment.BottomStart).padding(6.dp).fillMaxWidth(0.3f).height(5.dp).clip(CircleShape).background(k.accent2))
         }
-        Lbl(t.name, color = Color(s.text), weight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+        Lbl(t.name, color = k.text, weight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Swatches(t, dark, 12)
-            if (active) Box(Modifier.size(7.dp).clip(CircleShape).background(Color(s[Role.SUCCESS])))
+            Swatches(t, 12)
+            if (active) Box(Modifier.size(7.dp).clip(CircleShape).background(k.success))
         }
     }
 }
@@ -158,14 +163,45 @@ private fun modeHint(m: ThemeMode) = when (m) {
     var confirmReset by remember { mutableStateOf(false) }
     val clip = LocalClipboardManager.current; val ctx = LocalContext.current
     val shown = editing ?: pending
-    val dark = LookResolver.isDark(Store.theme.intValue, androidx.compose.foundation.isSystemInDarkTheme())
+    val dark = appDark()
+    fun rs(t: AppTheme) = ThemeEngine.resolve(t, dark)      // the theme in the current appearance (light / dark)
+    var editLight by remember { mutableStateOf(!dark) }
     fun activeId(): String? = when (mode) { ThemeMode.PRESET -> ThemeEngine.presetId; ThemeMode.CUSTOM -> ThemeEngine.activeProfileId; ThemeMode.DEFAULT -> "default"; else -> null }
     val ed = editing
 
     LazyColumn(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
         item { BackHeader(tr("Theme", "الثيم"), nav) }
-        item { ThemePreview(shown, dark) }
+        item { ThemePreview(rs(shown)) }
         if (ed == null) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionTitle(tr("Appearance", "المظهر"))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(tr("System", "النظام"), tr("Light", "فاتح"), tr("Dark", "داكن")).forEachIndexed { i, t -> FilterChip(Store.theme.intValue == i, { Store.setTheme(i) }, label = { Lbl(t) }) }
+                    }
+                    SectionTitle(tr("Decoration", "الزخرفة"))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(tr("Minimal", "بسيطة"), tr("Balanced", "متوازنة"), tr("Rich", "غنية")).forEachIndexed { i, t -> FilterChip(ThemeEngine.decoration == i, { ThemeEngine.chooseDecoration(i) }, label = { Lbl(t) }) }
+                    }
+                    Dim(tr("How many motifs, textures and ornamental borders a design may show. Balanced is recommended; shapes, tabs and fonts do not change.", "كم من الزخارف والملمس والحدود المزخرفة يُسمح للتصميم بإظهاره. المتوازنة هي الموصى بها، ولا تتغير الأشكال والتبويبات والخطوط."))
+                    SectionTitle(tr("Text size", "حجم الخط"))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(tr("Small", "صغير"), tr("Standard", "عادي"), tr("Large", "كبير")).forEachIndexed { i, t -> FilterChip(ThemeEngine.textSizeIdx == i, { ThemeEngine.chooseTextSize(i) }, label = { Lbl(t) }) }
+                    }
+                    Dim(tr("Applies to the whole app. Smaller text shows longer sentences without cutting them.", "ينطبق على التطبيق كله. الخط الأصغر يُظهر الجمل الطويلة دون قصّها."))
+                    Dim(tr("Light / Dark / System works with every theme: each theme has its own light and dark colours. Changing the theme never changes this choice.", "الفاتح والداكن والنظام تعمل مع كل ثيم: لكل ثيم ألوان فاتحة وداكنة خاصة به. تغيير الثيم لا يغيّر هذا الاختيار."))
+                }
+            }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("Look up game information online", "البحث عن معلومات اللعبة عبر الإنترنت"))
+                        Dim(tr("Looks the game's name up in an online encyclopedia (Wikipedia / Wikidata) once: it gives the game its own motifs and fills the About section (genre, age rating, release date, short premise). Only the name is sent. Off = name and artwork only.",
+                            "يبحث عن اسم اللعبة في موسوعة على الإنترنت (ويكيبيديا / ويكيداتا) مرة واحدة: فتحصل على زخارفها الخاصة ويُملأ قسم «عن اللعبة» (النوع والتصنيف العمري وتاريخ الإصدار ونبذة). يُرسَل الاسم فقط. عند الإيقاف: الاسم والغلاف فقط."))
+                    }
+                    Switch(ThemeEngine.onlineGenre, { ThemeEngine.enableOnlineGenre(it) })
+                }
+            }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionTitle(tr("Theme mode", "نمط الثيم"))
@@ -189,20 +225,6 @@ private fun modeHint(m: ThemeMode) = when (m) {
                     }
                 }
             }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SectionTitle(tr("Appearance", "المظهر"))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(tr("System", "النظام"), tr("Light", "فاتح"), tr("Dark", "داكن")).forEachIndexed { i, t -> FilterChip(Store.theme.intValue == i, { Store.setTheme(i) }, label = { Lbl(t) }) }
-                    }
-                    Dim(tr("Light / dark applies to every theme and every game: it never changes which theme or game identity is used.", "الفاتح/الداكن يُطبَّق على كل الثيمات والألعاب ولا يغيّر الثيم أو هوية اللعبة المستخدمة."))
-                    SectionTitle(tr("Decoration", "الزخرفة"))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(tr("Off", "إيقاف"), tr("Still", "ثابتة"), tr("Animated", "متحركة")).forEachIndexed { i, t -> FilterChip(ThemeEngine.fx == i, { ThemeEngine.chooseFx(i) }, label = { Lbl(t) }) }
-                    }
-                    Dim(tr("Ornaments, textures, light and particles. Motion stops by itself when system animations are off or battery saver is on.", "الزخارف والخامات والإضاءة والجسيمات. تتوقف الحركة تلقائيًا عند إيقاف رسوم النظام أو تفعيل توفير البطارية."))
-                }
-            }
             if (shown.id != activeId() && mode != ThemeMode.DYNAMIC) item {
                 Button(onClick = { if (shown.builtin) ThemeEngine.selectPreset(shown.id) else ThemeEngine.selectProfile(shown.id); pending = ThemeEngine.base }, Modifier.fillMaxWidth()) {
                     Ico(R.drawable.ic_check, 18.dp); Spacer(Modifier.width(6.dp)); Lbl(tr("Apply “${shown.name}”", "تطبيق «${shown.name}»")) }
@@ -211,7 +233,7 @@ private fun modeHint(m: ThemeMode) = when (m) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionTitle(tr("Ready-made themes", "ثيمات جاهزة"))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(ThemeEngine.PRESETS, key = { it.id }) { t -> ThemeCard(t, dark, mode == ThemeMode.PRESET && ThemeEngine.presetId == t.id || mode == ThemeMode.DEFAULT && t.id == "default", pending.id == t.id) { pending = t } }
+                        items(ThemeEngine.PRESETS, key = { it.id }) { t -> ThemeCard(rs(t), mode == ThemeMode.PRESET && ThemeEngine.presetId == t.id || mode == ThemeMode.DEFAULT && t.id == "default", pending.id == t.id) { pending = t } }
                     }
                 }
             }
@@ -226,7 +248,7 @@ private fun modeHint(m: ThemeMode) = when (m) {
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
                             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Swatches(p, dark)
+                                    Swatches(rs(p))
                                     Text(p.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     if (on) Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) { Lbl(tr("Active", "نشط"), Modifier.padding(horizontal = 10.dp, vertical = 3.dp), MaterialTheme.typography.labelSmall) }
                                 }
@@ -234,7 +256,7 @@ private fun modeHint(m: ThemeMode) = when (m) {
                                     if (!on) TextButton(onClick = { ThemeEngine.selectProfile(p.id); pending = ThemeEngine.base }) { Lbl(tr("Use", "استخدام")) }
                                     TextButton(onClick = { editing = p }) { Lbl(tr("Edit", "تعديل")) }
                                     TextButton(onClick = { pending = ThemeEngine.duplicate(p) }) { Lbl(tr("Duplicate", "نسخ")) }
-                                    TextButton(onClick = { clip.setText(AnnotatedString(ThemeEngine.exportJson(p))); android.widget.Toast.makeText(ctx, tr("Theme copied", "تم نسخ الثيم"), android.widget.Toast.LENGTH_SHORT).show() }) { Lbl(tr("Export", "تصدير")) }
+                                    TextButton(onClick = { clip.setText(AnnotatedString(ThemeEngine.toJson(p).toString())); android.widget.Toast.makeText(ctx, tr("Theme copied", "تم نسخ الثيم"), android.widget.Toast.LENGTH_SHORT).show() }) { Lbl(tr("Export", "تصدير")) }
                                     TextButton(onClick = { delete = p }) { Lbl(tr("Delete", "حذف"), color = MaterialTheme.colorScheme.error) }
                                 }
                             }
@@ -251,25 +273,61 @@ private fun modeHint(m: ThemeMode) = when (m) {
             item { SectionTitle(if (ed.builtin || ThemeEngine.profiles.none { it.id == ed.id }) tr("New profile", "ملف جديد") else tr("Edit profile", "تعديل الملف")) }
             item { OutlinedTextField(ed.name, { editing = ed.copy(name = it.take(32)) }, Modifier.fillMaxWidth(), label = { Text(tr("Profile name", "اسم الملف")) }, singleLine = true, isError = ed.name.isBlank()) }
             item {
-                Panel {
-                    ColorRow(tr("Primary background", "الخلفية الأساسية"), ed.bg) { editing = ed.copy(bg = it) }
-                    ColorRow(tr("Secondary background", "الخلفية الثانوية"), ed.bg2) { editing = ed.copy(bg2 = it) }
-                    ColorRow(tr("Card / surface", "البطاقة / السطح"), ed.surface) { editing = ed.copy(surface = it) }
-                    ColorRow(tr("Primary accent", "لون التمييز الأساسي"), ed.accent) { editing = ed.copy(accent = it) }
-                    ColorRow(tr("Secondary accent", "لون التمييز الثانوي"), ed.accent2) { editing = ed.copy(accent2 = it) }
-                    ColorRow(tr("Primary text", "النص الأساسي"), ed.text) { editing = ed.copy(text = it) }
-                    ColorRow(tr("Secondary text", "النص الثانوي"), ed.text2) { editing = ed.copy(text2 = it) }
-                    ColorRow(tr("Borders", "الحدود"), ed.border) { editing = ed.copy(border = it) }
-                    ColorRow(tr("Progress", "التقدّم"), ed.progress) { editing = ed.copy(progress = it) }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(!editLight, { editLight = false }, label = { Lbl(tr("Dark colours", "الألوان الداكنة")) })
+                        FilterChip(editLight, { editLight = true }, label = { Lbl(tr("Light colours", "الألوان الفاتحة")) })
+                    }
+                    Dim(tr("Each appearance has its own colours. Editing colours never changes the design layers below.", "لكل مظهر ألوانه. تعديل الألوان لا يغيّر طبقات التصميم أدناه."))
                 }
             }
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SectionTitle(tr("Style", "النمط"))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        DnaStyles.ALL.forEach { st -> FilterChip(ed.style.id == st.id, { editing = ed.copy(style = st) }, label = { Lbl(DnaStyles.label(st.id).let { tr(it.first, it.second) }) }) }
+                val set = ed.colorSet(editLight)
+                Panel {
+                    ColorRow(tr("Primary background", "الخلفية الأساسية"), set.bg) { editing = ed.withSet(editLight, set.copy(bg = it)) }
+                    ColorRow(tr("Secondary background", "الخلفية الثانوية"), set.bg2) { editing = ed.withSet(editLight, set.copy(bg2 = it)) }
+                    ColorRow(tr("Card / surface", "البطاقة / السطح"), set.surface) { editing = ed.withSet(editLight, set.copy(surface = it)) }
+                    ColorRow(tr("Primary accent", "لون التمييز الأساسي"), set.accent) { editing = ed.withSet(editLight, set.copy(accent = it)) }
+                    ColorRow(tr("Secondary accent", "لون التمييز الثانوي"), set.accent2) { editing = ed.withSet(editLight, set.copy(accent2 = it)) }
+                    ColorRow(tr("Primary text", "النص الأساسي"), set.text) { editing = ed.withSet(editLight, set.copy(text = it)) }
+                    ColorRow(tr("Secondary text", "النص الثانوي"), set.text2) { editing = ed.withSet(editLight, set.copy(text2 = it)) }
+                    ColorRow(tr("Borders", "الحدود"), set.border) { editing = ed.withSet(editLight, set.copy(border = it)) }
+                    ColorRow(tr("Progress", "التقدّم"), set.progress) { editing = ed.withSet(editLight, set.copy(progress = it)) }
+                }
+            }
+            item {
+                val warn = ThemeEngine.warnings(ed, editLight)
+                if (warn.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(tr("Poor contrast in these colours (adjusted automatically when you save):", "تباين ضعيف في هذه الألوان (يُعدَّل تلقائيًا عند الحفظ):"), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
+                    warn.forEach { Dim(it) }
+                }
+            }
+            item {
+                val dn = ed.dna
+                Panel {
+                    SectionTitle(tr("Design", "التصميم"))
+                    Dim(tr("Independent layers: mix them freely, or copy the whole design of another theme.", "طبقات مستقلة: امزجها بحرية أو انسخ تصميم ثيم آخر كاملًا."))
+                    Text(tr("Copy the design of", "نسخ تصميم"), style = MaterialTheme.typography.labelLarge)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ThemeEngine.PRESETS.forEach { p -> FilterChip(dn == p.dna, { editing = ed.copy(dna = p.dna) }, label = { Lbl(p.name) }) }
                     }
-                    Dim(tr("Shape of cards, borders, separators and ornaments. Colours are independent of the style.", "شكل البطاقات والحدود والفواصل والزخارف. الألوان مستقلة عن النمط."))
+                    LayerRow(tr("Corners", "الزوايا"), Corner.values(), dn.shape.corner) { editing = ed.copy(dna = dn.copy(shape = dn.shape.copy(corner = it))) }
+                    LayerRow(tr("Border", "الحدود"), BorderKind.values(), dn.border.kind) { editing = ed.copy(dna = dn.copy(border = dn.border.copy(kind = it))) }
+                    LayerRow(tr("Divider", "الفاصل"), RuleKind.values(), dn.rule) { editing = ed.copy(dna = dn.copy(rule = it)) }
+                    LayerRow(tr("Surface", "السطح"), SurfaceKind.values(), dn.surface) { editing = ed.copy(dna = dn.copy(surface = it)) }
+                    LayerRow(tr("Texture", "الملمس"), TextureKind.values(), dn.texture.kind) { k -> editing = ed.copy(dna = dn.copy(texture = dn.texture.copy(kind = k, intensity = if (k == TextureKind.NONE) 0f else maxOf(dn.texture.intensity, 0.6f)))) }
+                    LayerRow(tr("Tabs", "التبويبات"), TabKind.values(), dn.tabs) { editing = ed.copy(dna = dn.copy(tabs = it)) }
+                    LayerRow(tr("Progress", "التقدّم"), ProgressKind.values(), dn.progress) { editing = ed.copy(dna = dn.copy(progress = it)) }
+                    LayerRow(tr("Game header", "ترويسة اللعبة"), HeroKind.values(), dn.hero) { editing = ed.copy(dna = dn.copy(hero = it)) }
+                    LayerRow(tr("Title font", "خط العناوين"), FontKind.values(), dn.type.title) { editing = ed.copy(dna = dn.copy(type = dn.type.copy(title = it))) }
+                    LayerRow(tr("Body font", "خط النص"), FontKind.values(), dn.type.body) { editing = ed.copy(dna = dn.copy(type = dn.type.copy(body = it))) }
+                    Text(tr("Ornaments (game header)", "الزخارف (ترويسة اللعبة)"), style = MaterialTheme.typography.labelLarge)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OrnamentKind.values().forEach { k ->
+                            val on = dn.ornaments.any { it.kind == k }
+                            FilterChip(on, { editing = ed.copy(dna = dn.copy(ornaments = if (on) dn.ornaments.filter { it.kind != k } else dn.ornaments + OrnamentDna(k, 1f, 0.5f))) }, label = { Lbl(k.name.lowercase().replace('_', ' ')) })
+                        }
+                    }
                 }
             }
             item { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -280,7 +338,7 @@ private fun modeHint(m: ThemeMode) = when (m) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(enabled = ed.name.isNotBlank(), onClick = { ThemeEngine.saveProfile(ed, true); pending = ThemeEngine.base; editing = null }) { Lbl(tr("Save and apply", "حفظ وتطبيق")) }
                     OutlinedButton(onClick = { editing = null }) { Lbl(tr("Discard changes", "تجاهل التغييرات")) }
-                    ThemeEngine.preset(ed.basePreset)?.let { b -> TextButton(onClick = { editing = ed.copy(bg = b.bg, bg2 = b.bg2, surface = b.surface, accent = b.accent, accent2 = b.accent2, text = b.text, text2 = b.text2, border = b.border, progress = b.progress) }) { Lbl(tr("Restore “${b.name}” values", "استعادة قيم «${b.name}»")) } }
+                    ThemeEngine.preset(ed.basePreset)?.let { b -> TextButton(onClick = { editing = ed.copy(bg = b.bg, bg2 = b.bg2, surface = b.surface, accent = b.accent, accent2 = b.accent2, text = b.text, text2 = b.text2, border = b.border, progress = b.progress, light = b.light, dna = b.dna) }) { Lbl(tr("Restore “${b.name}” values", "استعادة قيم «${b.name}»")) } }
                 }
             }
         }
@@ -294,13 +352,13 @@ private fun modeHint(m: ThemeMode) = when (m) {
         confirmButton = { TextButton(onClick = { ThemeEngine.setGameAccents(false); ThemeEngine.resetToDefault(); pending = ThemeEngine.DEFAULT; confirmReset = false }) { Lbl(tr("Restore", "استعادة")) } },
         dismissButton = { TextButton(onClick = { confirmReset = false }) { Lbl(tr("Cancel", "إلغاء")) } })
     if (importing) {
-        var txt by remember { mutableStateOf("") }; var err by remember { mutableStateOf<String?>(null) }
+        var txt by remember { mutableStateOf("") }; var err by remember { mutableStateOf(false) }
         AlertDialog(onDismissRequest = { importing = false }, title = { Text(tr("Import a theme", "استيراد ثيم")) },
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(txt, { txt = it; err = null }, Modifier.fillMaxWidth(), minLines = 4, maxLines = 8, isError = err != null, label = { Text(tr("Paste the exported theme", "الصق الثيم المُصدَّر")) })
-                err?.let { Text(tr("This is not a valid theme.", "هذا ليس ثيمًا صالحًا.") + " ($it)", color = MaterialTheme.colorScheme.error) }
+                OutlinedTextField(txt, { txt = it; err = false }, Modifier.fillMaxWidth(), minLines = 4, maxLines = 8, isError = err, label = { Text(tr("Paste the exported theme", "الصق الثيم المُصدَّر")) })
+                if (err) Text(tr("This is not a valid theme.", "هذا ليس ثيمًا صالحًا."), color = MaterialTheme.colorScheme.error)
             } },
-            confirmButton = { TextButton(onClick = { when (val r = ThemeEngine.importText(txt)) { is Parsed.Err -> err = r.reason; is Parsed.Ok -> { pending = r.value; importing = false } } }) { Lbl(tr("Import", "استيراد")) } },
+            confirmButton = { TextButton(onClick = { val t = ThemeEngine.importJson(txt); if (t == null) err = true else { pending = t; importing = false } }) { Lbl(tr("Import", "استيراد")) } },
             dismissButton = { TextButton(onClick = { importing = false }) { Lbl(tr("Cancel", "إلغاء")) } })
     }
 }

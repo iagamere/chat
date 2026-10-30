@@ -3,138 +3,190 @@ package com.abdo.ps4monitor
 import kotlin.math.max
 import kotlin.math.min
 
+/** The result of the local analysis: colours for both appearances + the design layers + the measurements they came from. */
+class GeneratedDesign(val dark: ColorSet, val light: ColorSet, val dna: Dna, val profile: ArtProfile, val tags: Map<Tag, Float> = emptyMap()) {
+    /** measurements + detected game type, stored with the design and shown as "why this design" */
+    fun report(): List<Pair<String, Float>> = profile.report() + tags.map { ("tag:" + it.key.name) to it.value }
+}
+
+/** The component language of one kind of game. A null field means "let the artwork decide". */
+class Kit(
+    val shape: ShapeDna, val border: BorderDna, val rule: RuleKind, val texture: TextureDna, val ornaments: List<OrnamentDna>,
+    val type: TypeDna, val tabs: TabKind, val progress: ProgressKind, val surface: SurfaceKind? = null, val hero: HeroKind? = null,
+)
+
 /**
- * Turns measured artwork ([CoverFeatures]) into a coherent [DesignDna]. Nothing here knows a game's name: the identity comes from
- * continuous scores (paper-like, misty, dramatic, organic ...) computed from the measurements, so unseen games get an identity too.
- *
- *  - Colours: both a light and a dark scheme are always generated from the same hue family; the artwork's own polarity only decides
- *    which of the two is the more faithful one. Every scheme is then repaired against [DnaRules] (4.5:1 text, 3:1 graphics).
- *  - Composition: the best-scoring archetype supplies the shape family, borders, separators, motif, texture and atmosphere; its
- *    strength follows how clearly the artwork matches it and how confident the analysis is.
+ * ArtProfile -> design. Every layer is decided on its own from the measurements (never "pick a template"), so the layers combine freely:
+ * an artwork can get cut corners with a glow border, or square corners with particles. Nothing here knows a game name or an id.
+ * Hue only reaches the COLOUR layer; every structural decision uses hue-independent scores.
  */
 object DnaGenerator {
-    private fun ramp(x: Float, lo: Float, hi: Float) = ((x - lo) / (hi - lo)).coerceIn(0f, 1f)
+    private fun s(p: ArtProfile, k: ArtStyle) = p.styles[k] ?: 0f
+    private fun hsl(c: Int) = ColorMath.toHsl(c)
 
-    /** Archetype scores (0..1) for diagnostics and tests. */
-    fun scores(f: CoverFeatures): Map<String, Float> {
-        val lightness = ramp(f.lightFraction, 0.25f, 0.60f)
-        val dull = 1f - ramp(f.meanSaturation, 0.22f, 0.50f)
-        val open = ramp(f.negativeSpace + 0.5f * f.flatness, 0.15f, 0.45f)
-        val paper = 0.45f * lightness + 0.25f * dull + 0.30f * open
+    private fun o(k: OrnamentKind, d: Float = 1f, a: Float = 0.3f) = OrnamentDna(k, d, a)
+    private fun tx(k: TextureKind, i: Float, cards: Boolean = false) = TextureDna(k, i, cards)
 
-        val cool = ramp(-f.warmth, 0.10f, 0.50f)
-        val dimMid = 1f - ramp(f.meanLuma, 0.45f, 0.70f)
-        val soft = 1f - ramp(f.edgeDensity, 0.22f, 0.50f)
-        val vivid = ramp(f.colorfulness, 0.20f, 0.50f)
-        val mist = cool * (0.5f + 0.5f * soft) * (0.6f + 0.4f * dimMid) * (0.5f + 0.5f * vivid)
-
-        val contrast = ramp(f.spread, 0.18f, 0.50f)
-        val busy = ramp(f.edgeDensity, 0.12f, 0.32f)
-        val darkness = ramp(f.darkFraction, 0.25f, 0.55f)
-        val hueRed = 1f - ramp(min(ColorOps.hueDistance(f.dominantHue, 355f), 80f), 20f, 80f)
-        val hueViolet = 1f - ramp(ColorOps.hueDistance(f.dominantHue, 285f), 25f, 70f)
-        val hot = max(ramp(f.warmth, 0.10f, 0.50f), max(hueRed, hueViolet))
-        val drama = contrast * (0.4f + 0.6f * max(busy, darkness)) * (0.5f + 0.5f * hot) * (0.7f + 0.3f * vivid) * (0.35f + 0.65f * max(darkness, vivid))
-
-        val green = 1f - ramp(ColorOps.hueDistance(f.dominantHue, 110f), 25f, 75f)
-        val organic = green * (0.5f + 0.5f * vivid) * (0.6f + 0.4f * busy)
-        return mapOf("paper" to paper.coerceIn(0f, 1f), "mist" to mist.coerceIn(0f, 1f), "angular" to drama.coerceIn(0f, 1f), "organic" to organic.coerceIn(0f, 1f))
+    /** Motifs, shapes and typography per kind of game: all of it is drawn procedurally by DnaKit, nothing is a picture. */
+    fun kit(t: Tag): Kit = when (t) {
+        Tag.SPORTS -> Kit(ShapeDna(Corner.SLANT, 1f, 4), BorderDna(BorderKind.SINGLE, 1.2f), RuleKind.PITCH, tx(TextureKind.DIAGONAL, 0.6f),
+            listOf(o(OrnamentKind.PITCH_LINES, 1f, 0.28f), o(OrnamentKind.SPEED_STRIPES, 1f, 0.2f)), TypeDna(FontKind.DISPLAY, FontKind.DEFAULT, 0, 0.03f), TabKind.SLANT, ProgressKind.STRIPED, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.RACING -> Kit(ShapeDna(Corner.SLANT, 1f, 4), BorderDna(BorderKind.SINGLE, 1.4f), RuleKind.STRIPES, tx(TextureKind.DIAGONAL, 0.7f),
+            listOf(o(OrnamentKind.SPEED_STRIPES, 1.2f, 0.3f), o(OrnamentKind.CHECKER_STRIP, 1f, 0.3f)), TypeDna(FontKind.TECH, FontKind.DEFAULT, 700, 0.03f), TabKind.SLANT, ProgressKind.STRIPED, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.FIGHTING -> Kit(ShapeDna(Corner.CUT, 1f, 4), BorderDna(BorderKind.SINGLE, 1.4f), RuleKind.TECH, tx(TextureKind.PARTICLES, 0.45f),
+            listOf(o(OrnamentKind.SCRATCHES, 1f, 0.4f), o(OrnamentKind.SPORES, 0.6f, 0.5f)), TypeDna(FontKind.DISPLAY, FontKind.DEFAULT, 0, 0.03f), TabKind.CUT, ProgressKind.TICKS, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.SHOOTER -> Kit(ShapeDna(Corner.CUT, 0.8f, 4), BorderDna(BorderKind.SINGLE, 1.4f), RuleKind.TECH, tx(TextureKind.HEX, 0.5f),
+            listOf(o(OrnamentKind.HEX_GRID, 1f, 0.22f)), TypeDna(FontKind.DISPLAY, FontKind.DEFAULT, 0, 0.03f), TabKind.CUT, ProgressKind.TICKS, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.HORROR -> Kit(ShapeDna(Corner.SQUARE, 1f, 2), BorderDna(BorderKind.SINGLE, 0.75f), RuleKind.BRUSH, tx(TextureKind.PAPER, 0.9f),
+            listOf(o(OrnamentKind.SCRATCHES, 1.2f, 0.35f)), TypeDna(FontKind.ROMAN, FontKind.DEFAULT, 600, 0.03f), TabKind.UNDERLINE, ProgressKind.BRUSH, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.FANTASY -> Kit(ShapeDna(Corner.ROUND, 1f, 4), BorderDna(BorderKind.GLOW, 0.8f), RuleKind.DIAMOND, tx(TextureKind.PARTICLES, 0.5f),
+            listOf(o(OrnamentKind.SPORES, 0.7f, 0.6f)), TypeDna(FontKind.ROMAN, FontKind.DEFAULT, 700, 0.03f), TabKind.UNDERLINE, ProgressKind.BAR, SurfaceKind.GRADIENT, HeroKind.FADE)
+        Tag.DARK_FANTASY -> Kit(ShapeDna(Corner.ROUND, 1.2f, 4), BorderDna(BorderKind.GLOW, 0.8f), RuleKind.GLOW, tx(TextureKind.PARTICLES, 0.7f),
+            listOf(o(OrnamentKind.LIGHT_RAYS, 1f, 0.14f), o(OrnamentKind.SPORES, 1f, 0.8f)), TypeDna(FontKind.ROMAN, FontKind.DEFAULT, 700, 0.03f), TabKind.PILL, ProgressKind.GLOW, SurfaceKind.GLASS, HeroKind.FADE)
+        Tag.SAMURAI -> Kit(ShapeDna(Corner.SQUARE, 1f, 3), BorderDna(BorderKind.DOUBLE, 0.8f), RuleKind.BRUSH, tx(TextureKind.PAPER, 0.8f, true),
+            listOf(o(OrnamentKind.GINKGO, 0.8f, 0.6f), o(OrnamentKind.BRUSH_SWEEP, 1f, 0.55f), o(OrnamentKind.SEIGAIHA_BAND, 1f, 0.35f)), TypeDna(FontKind.SANS, FontKind.SERIF, 500, 0.06f), TabKind.UNDERLINE, ProgressKind.BRUSH, SurfaceKind.SOLID, HeroKind.FRAMED)
+        Tag.SCIFI -> Kit(ShapeDna(Corner.CUT, 1f, 4), BorderDna(BorderKind.GLOW, 0.8f), RuleKind.TECH, tx(TextureKind.GRID, 0.6f),
+            listOf(o(OrnamentKind.CIRCUIT, 1f, 0.3f), o(OrnamentKind.HEX_GRID, 0.8f, 0.14f)), TypeDna(FontKind.TECH, FontKind.DEFAULT, 600, 0.03f), TabKind.CUT, ProgressKind.GLOW, SurfaceKind.GLASS, HeroKind.FADE)
+        Tag.CYBERPUNK -> Kit(ShapeDna(Corner.CUT, 1f, 4), BorderDna(BorderKind.SINGLE, 1.4f), RuleKind.TECH, tx(TextureKind.GRID, 0.7f),
+            listOf(o(OrnamentKind.CIRCUIT, 1.2f, 0.35f), o(OrnamentKind.SPEED_STRIPES, 0.6f, 0.2f)), TypeDna(FontKind.TECH, FontKind.DEFAULT, 800, 0.03f), TabKind.CUT, ProgressKind.TICKS, SurfaceKind.GLASS, HeroKind.FADE)
+        Tag.SPACE -> Kit(ShapeDna(Corner.ROUND, 1.2f, 4), BorderDna(BorderKind.GLOW, 1f), RuleKind.GLOW, tx(TextureKind.STARS, 0.8f),
+            listOf(o(OrnamentKind.STARFIELD, 1f, 0.7f), o(OrnamentKind.LIGHT_RAYS, 0.7f, 0.1f)), TypeDna(FontKind.TECH, FontKind.DEFAULT, 500, 0.04f), TabKind.PILL, ProgressKind.GLOW, SurfaceKind.GLASS, HeroKind.FADE)
+        Tag.PIXEL -> Kit(ShapeDna(Corner.SQUARE, 1f, 0), BorderDna(BorderKind.SINGLE, 2f), RuleKind.PIXEL, tx(TextureKind.PIXELS, 0.6f),
+            listOf(o(OrnamentKind.PIXEL_BLOCKS, 1f, 0.5f)), TypeDna(FontKind.PIXEL, FontKind.DEFAULT, 0, 0f), TabKind.CUT, ProgressKind.TICKS, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.ANIME -> Kit(ShapeDna(Corner.ROUND, 1.25f, 4), BorderDna(BorderKind.SINGLE, 1f), RuleKind.DIAMOND, tx(TextureKind.NONE, 0f),
+            listOf(o(OrnamentKind.HALFTONE, 1f, 0.28f), o(OrnamentKind.SPEED_STRIPES, 0.5f, 0.16f)), TypeDna(FontKind.SANS, FontKind.DEFAULT, 800, 0f), TabKind.PILL, ProgressKind.BAR, SurfaceKind.GRADIENT, HeroKind.FADE)
+        Tag.ADVENTURE -> Kit(ShapeDna(Corner.ROUND, 1f, 4), BorderDna(BorderKind.SINGLE, 1f), RuleKind.DIAMOND, tx(TextureKind.NONE, 0f),
+            listOf(o(OrnamentKind.CONTOURS, 1f, 0.22f)), TypeDna(FontKind.SERIF, FontKind.DEFAULT, 600, 0.03f), TabKind.UNDERLINE, ProgressKind.BAR, SurfaceKind.GRADIENT, HeroKind.FADE)
+        Tag.STRATEGY -> Kit(ShapeDna(Corner.SQUARE, 1f, 2), BorderDna(BorderKind.SINGLE, 1f), RuleKind.TECH, tx(TextureKind.GRID, 0.5f),
+            listOf(o(OrnamentKind.HEX_GRID, 1f, 0.2f)), TypeDna(FontKind.ROMAN, FontKind.DEFAULT, 600, 0.03f), TabKind.UNDERLINE, ProgressKind.TICKS, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.SURVIVAL -> Kit(ShapeDna(Corner.SQUARE, 1f, 2), BorderDna(BorderKind.SINGLE, 1f), RuleKind.BRUSH, tx(TextureKind.PAPER, 0.6f),
+            listOf(o(OrnamentKind.SCRATCHES, 0.8f, 0.3f), o(OrnamentKind.CONTOURS, 1f, 0.18f)), TypeDna(FontKind.DISPLAY, FontKind.DEFAULT, 0, 0.03f), TabKind.UNDERLINE, ProgressKind.TICKS, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.FAMILY -> Kit(ShapeDna(Corner.ROUND, 1.5f, 4), BorderDna(BorderKind.SINGLE, 1f), RuleKind.WAVE, tx(TextureKind.NONE, 0f),
+            listOf(o(OrnamentKind.SPORES, 1f, 0.7f)), TypeDna(FontKind.SANS, FontKind.DEFAULT, 800, 0f), TabKind.PILL, ProgressKind.BAR, SurfaceKind.GRADIENT, HeroKind.FADE)
+        Tag.SOULSLIKE -> Kit(ShapeDna(Corner.SQUARE, 1f, 3), BorderDna(BorderKind.DOUBLE, 0.8f), RuleKind.DIAMOND, tx(TextureKind.NONE, 0f),
+            listOf(o(OrnamentKind.LIGHT_RAYS, 1f, 0.12f), o(OrnamentKind.SPORES, 0.8f, 0.6f)), TypeDna(FontKind.ROMAN, FontKind.DEFAULT, 600, 0.03f), TabKind.UNDERLINE, ProgressKind.BAR, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.MYTHIC -> Kit(ShapeDna(Corner.SQUARE, 1f, 2), BorderDna(BorderKind.SINGLE, 1.2f), RuleKind.RUNIC, tx(TextureKind.PAPER, 0.6f),
+            listOf(o(OrnamentKind.RUNES, 1f, 0.32f), o(OrnamentKind.LIGHT_RAYS, 0.7f, 0.10f)), TypeDna(FontKind.ROMAN, FontKind.DEFAULT, 700, 0.03f), TabKind.CUT, ProgressKind.TICKS, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.ACTION -> Kit(ShapeDna(Corner.CUT, 0.9f, 4), BorderDna(BorderKind.SINGLE, 1.2f), RuleKind.STRIPES, tx(TextureKind.NONE, 0f),
+            listOf(o(OrnamentKind.SCRATCHES, 0.8f, 0.3f), o(OrnamentKind.LIGHT_RAYS, 0.6f, 0.12f)), TypeDna(FontKind.DISPLAY, FontKind.DEFAULT, 0, 0.03f), TabKind.CUT, ProgressKind.TICKS, SurfaceKind.SOLID, HeroKind.FADE)
+        Tag.NAUTICAL -> Kit(ShapeDna(Corner.ROUND, 1.1f, 4), BorderDna(BorderKind.SINGLE, 1f), RuleKind.WAVE, tx(TextureKind.NONE, 0f),
+            listOf(o(OrnamentKind.WAVES, 1f, 0.35f)), TypeDna(FontKind.ROMAN, FontKind.DEFAULT, 600, 0.03f), TabKind.UNDERLINE, ProgressKind.BAR, SurfaceKind.GRADIENT, HeroKind.FADE)
     }
 
-    /** Picks the composition for the artwork: the best-matching template, scaled by how clear the match and the analysis are. */
-    fun styleFor(f: CoverFeatures): StyleSpec = styleRaw(f).normalized()
-    private fun styleRaw(f: CoverFeatures): StyleSpec {
-        val sc = scores(f)
-        val best = sc.maxByOrNull { it.value } ?: return DnaStyles.PLAIN
-        if (best.value < 0.20f) return DnaStyles.PLAIN
-        val base = DnaStyles.byId(best.key) ?: return DnaStyles.PLAIN
-        val strength = (0.35f + 0.65f * ramp(best.value, 0.20f, 0.70f)) * (0.5f + 0.5f * f.confidence)
-        val s = DnaStyles.scaled(base, strength)
-        val soft = 1f - ramp(f.edgeDensity, 0.15f, 0.45f)
-        val busy = 1f - soft
-        return when (best.key) {
-            "paper" -> s.copy(shape = s.shape.copy(radius = 4f + 4f * soft))
-            "mist" -> s.copy(shape = s.shape.copy(radius = 18f + 8f * soft), atmosphere = s.atmosphere.copy(angle = 80f + 40f * (f.balanceX + 1f) / 2f))
-            "angular" -> s.copy(shape = s.shape.copy(cut = 6f + 8f * busy), atmosphere = s.atmosphere.copy(particleCount = (s.atmosphere.particleCount * (1f - 0.4f * soft)).toInt()))
-            "organic" -> s.copy(shape = s.shape.copy(radius = 22f + 8f * ramp(f.colorfulness, 0.2f, 0.6f)))
-            else -> s
+    fun generate(p: ArtProfile, tags: Map<Tag, Float> = emptyMap()): GeneratedDesign {
+        val paper = s(p, ArtStyle.PAPER); val lum = s(p, ArtStyle.LUMINOUS); val dram = s(p, ArtStyle.DRAMATIC)
+        val neon = s(p, ArtStyle.NEON); val mini = s(p, ArtStyle.MINIMAL); val soft = s(p, ArtStyle.SOFT)
+        val angular = max(dram, neon * 0.8f)
+        val glowy = max(lum, neon)
+        val sure = p.confidence >= 0.35f
+
+        val corner = when {
+            !sure -> ShapeDna()
+            angular >= 0.5f -> ShapeDna(Corner.CUT, 1f, 4)
+            paper >= 0.5f || mini >= 0.5f -> ShapeDna(Corner.SQUARE, 1f, 3)
+            else -> ShapeDna(Corner.ROUND, (1f + 0.35f * lum + 0.15f * soft).coerceIn(0.9f, 1.4f), 4)
         }
-    }
-
-    // ------------------------------------------------------------------ colours
-    private class Tint(val h: Float, val s: Float)
-
-    private fun tintOf(c: Int, keyHue: Float, minSat: Float): Tint {
-        val x = ColorMath.toHsl(c)
-        return if (x[1] < 0.08f) Tint(keyHue, minSat) else Tint(x[0], x[1])
-    }
-
-    /**
-     * [native]: this appearance matches the artwork's own brightness, so it keeps the artwork's tint at full strength; the other one is
-     * a calmer relative of it.
-     */
-    private fun buildScheme(dark: Boolean, native: Boolean, tint: Tint, accentHsl: FloatArray, h2: Float, s2: Float, h3: Float): DnaScheme {
-        val h = tint.h
-        val sBg = (tint.s * (if (native) 1f else 0.75f)).coerceIn(0.06f, 0.55f)
-        val m = HashMap<Role, Int>()
-        if (dark) {
-            m[Role.BG] = ColorOps.hsl(h, sBg, 0.060f); m[Role.LOW] = ColorOps.hsl(h, sBg, 0.080f); m[Role.BG2] = ColorOps.hsl(h, sBg * 0.95f, 0.100f)
-            m[Role.CARD] = ColorOps.hsl(h, sBg * 0.75f, 0.135f); m[Role.HIGH] = ColorOps.hsl(h, sBg * 0.60f, 0.180f)
-            m[Role.TEXT] = ColorOps.hsl(h, 0.15f, 0.95f); m[Role.MUTED] = ColorOps.hsl(h, 0.12f, 0.74f)
-            m[Role.OUTLINE] = ColorOps.hsl(h, 0.10f, 0.55f); m[Role.OUTLINE_VARIANT] = ColorOps.hsl(h, sBg * 0.9f, 0.24f)
-        } else {
-            // at very high lightness a pastel tint needs a high HSL saturation to be visible at all
-            val sl = (tint.s.coerceAtLeast(0.25f) * (if (native) 1.4f else 1.1f)).coerceIn(0.30f, 0.85f)
-            m[Role.BG] = ColorOps.hsl(h, sl, 0.968f); m[Role.LOW] = ColorOps.hsl(h, sl, 0.955f); m[Role.BG2] = ColorOps.hsl(h, sl, 0.940f)
-            m[Role.CARD] = ColorOps.hsl(h, sl * 0.95f, 0.915f); m[Role.HIGH] = ColorOps.hsl(h, sl * 0.9f, 0.885f)
-            m[Role.TEXT] = ColorOps.hsl(h, 0.30f, 0.09f); m[Role.MUTED] = ColorOps.hsl(h, 0.18f, 0.30f)
-            m[Role.OUTLINE] = ColorOps.hsl(h, 0.10f, 0.42f); m[Role.OUTLINE_VARIANT] = ColorOps.hsl(h, sl, 0.80f)
+        val border = when {
+            !sure -> BorderDna()
+            paper >= 0.5f -> BorderDna(BorderKind.DOUBLE, 0.8f)
+            glowy >= 0.5f -> BorderDna(BorderKind.GLOW, 1f)
+            angular >= 0.5f -> BorderDna(BorderKind.SINGLE, 1.4f)
+            mini >= 0.5f -> BorderDna(BorderKind.SINGLE, 0.75f)
+            else -> BorderDna()
         }
-        val card = m[Role.CARD]!!
-        val ha = accentHsl[0]; val sa = accentHsl[1].coerceIn(0.40f, 0.95f)
-        val primary = ColorOps.hsl(ha, sa, if (dark) 0.66f else 0.38f)
-        val secondary = ColorOps.hsl(h2, s2.coerceIn(0.40f, 0.90f), if (dark) 0.68f else 0.36f)
-        val tertiary = ColorOps.hsl(h3, 0.55f, if (dark) 0.68f else 0.36f)
-        m[Role.PRIMARY] = primary; m[Role.ON_PRIMARY] = ColorOps.readableOn(primary, ha)
-        m[Role.PRIMARY_CONTAINER] = ColorOps.mix(card, primary, if (dark) 0.28f else 0.16f); m[Role.ON_PRIMARY_CONTAINER] = m[Role.TEXT]!!
-        m[Role.SECONDARY] = secondary; m[Role.ON_SECONDARY] = ColorOps.readableOn(secondary, h2)
-        m[Role.SECONDARY_CONTAINER] = ColorOps.mix(card, secondary, if (dark) 0.18f else 0.12f); m[Role.ON_SECONDARY_CONTAINER] = m[Role.TEXT]!!
-        m[Role.TERTIARY] = tertiary; m[Role.ON_TERTIARY] = ColorOps.readableOn(tertiary, h3)
-        m[Role.TERTIARY_CONTAINER] = ColorOps.mix(card, tertiary, if (dark) 0.22f else 0.14f); m[Role.ON_TERTIARY_CONTAINER] = m[Role.TEXT]!!
-        ThemeCore.fixedStatusColors(dark, m)
-        m[Role.PROGRESS] = primary; m[Role.GLOW] = ColorOps.hsl(ha, 0.8f, if (dark) 0.60f else 0.50f)
-        m[Role.HERO_TOP] = ColorOps.mix(m[Role.BG]!!, primary, if (dark) 0.20f else 0.12f); m[Role.HERO_BOTTOM] = m[Role.BG]!!
-        return DnaRules.repair(DnaScheme.of(dark, m)!!)
-    }
-
-    /**
-     * [key]: a stable id of the game (title id); [name]: display name. Never throws; unusable artwork gives the neutral fallback so a missing
-     * or broken cover simply looks like the app itself.
-     */
-    fun generate(f: CoverFeatures, key: String, name: String = ""): DesignDna {
-        if (!f.usable) return fallback(key, name)
-        val keyHue = when {
-            f.colorfulness >= 0.04f -> f.dominantHue
-            ColorMath.toHsl(f.accent)[1] >= 0.15f -> ColorMath.toHsl(f.accent)[0]
-            else -> ColorMath.toHsl(f.lightColor).let { if (it[1] >= 0.08f) it[0] else 230f }
+        val rule = when {
+            !sure -> RuleKind.HAIRLINE
+            paper >= 0.5f -> RuleKind.BRUSH
+            glowy >= 0.5f -> RuleKind.GLOW
+            angular >= 0.5f -> RuleKind.TECH
+            soft >= 0.5f -> RuleKind.DIAMOND
+            else -> RuleKind.HAIRLINE
         }
-        val darkTint = tintOf(f.darkColor, keyHue, 0.12f)
-        val lightTint = tintOf(f.lightColor, keyHue, 0.12f)
-        val acc = ColorMath.toHsl(f.accent).let { if (it[1] < 0.25f) floatArrayOf(keyHue, 0.40f, it[2]) else it }
-        val sec = f.secondary?.let { ColorMath.toHsl(it) }
-        // no second colour in the artwork: a neighbouring hue, pulled towards red for warm accents and towards violet for cool ones
-        val h2 = sec?.get(0) ?: ((acc[0] + (if (acc[0] < 180f) -38f else 38f) + 360f) % 360f); val s2 = sec?.get(1) ?: acc[1]
-        val h3 = (h2 + 110f) % 360f
-        val nativeDark = f.darkNative
-        val dark = buildScheme(true, nativeDark, darkTint, acc, h2, s2, h3)
-        val light = buildScheme(false, !nativeDark, lightTint, acc, h2, s2, h3)
-        val seed = DnaHash.seed(key + "|" + f.fingerprint)
-        return DesignDna(DNA_SCHEMA, "game:$key", name.ifBlank { key }, DnaSource.GAME, f.fingerprint, Math.round(f.confidence * 1000f) / 1000f, seed, nativeDark, light, dark, styleFor(f))
+        val surface = when {
+            !sure -> SurfaceKind.GRADIENT
+            glowy >= 0.5f -> SurfaceKind.GLASS
+            paper >= 0.5f || mini >= 0.5f || angular >= 0.5f -> SurfaceKind.SOLID
+            else -> SurfaceKind.GRADIENT
+        }
+        val texture = when {
+            !sure -> TextureDna()
+            paper >= 0.5f -> TextureDna(TextureKind.PAPER, 0.8f, onCards = true)
+            neon >= 0.5f -> TextureDna(TextureKind.GRID, 0.7f)
+            lum >= 0.5f -> TextureDna(TextureKind.PARTICLES, 0.7f)
+            dram >= 0.5f -> TextureDna(TextureKind.PARTICLES, 0.45f)
+            else -> TextureDna()
+        }
+        val ornaments = buildList {
+            if (!sure) return@buildList
+            if (lum >= 0.5f) add(OrnamentDna(OrnamentKind.LIGHT_RAYS, 1f, 0.14f))
+            if (lum >= 0.4f || neon >= 0.5f) add(OrnamentDna(OrnamentKind.SPORES, 1f, 0.8f))
+            else if (dram >= 0.5f) add(OrnamentDna(OrnamentKind.SPORES, 0.6f, 0.5f))
+            if (paper >= 0.5f) add(OrnamentDna(OrnamentKind.BRUSH_SWEEP, 1f, 0.55f))
+        }
+        val type = when {
+            !sure -> TypeDna()
+            paper >= 0.5f -> TypeDna(FontKind.SANS, FontKind.SERIF, 500, 0.06f)
+            lum >= 0.5f -> TypeDna(FontKind.SERIF, FontKind.DEFAULT, 700, 0.03f)
+            dram >= 0.5f -> TypeDna(FontKind.CONDENSED, FontKind.DEFAULT, 800, 0.02f)
+            neon >= 0.5f -> TypeDna(FontKind.CONDENSED, FontKind.DEFAULT, 700, 0.03f)
+            mini >= 0.5f -> TypeDna(FontKind.SANS, FontKind.DEFAULT, 300, 0.03f)
+            soft >= 0.5f -> TypeDna(FontKind.SANS, FontKind.DEFAULT, 600, 0f)
+            else -> TypeDna()
+        }
+        val spacing = if (!sure) 1f else (1f + 0.35f * (p.flat - 0.25f)).coerceIn(0.92f, 1.14f)
+        val hero = if (sure && (paper >= 0.5f || mini >= 0.5f)) HeroKind.FRAMED else HeroKind.FADE
+        val tabs = when { !sure -> TabKind.PILL; paper >= 0.5f -> TabKind.UNDERLINE; angular >= 0.5f -> TabKind.CUT; else -> TabKind.PILL }
+        val progress = when { !sure -> ProgressKind.BAR; paper >= 0.5f -> ProgressKind.BRUSH; glowy >= 0.5f -> ProgressKind.GLOW; angular >= 0.5f -> ProgressKind.TICKS; else -> ProgressKind.BAR }
+        var dna = Dna(corner, border, rule, surface, texture, ornaments, type, spacing, hero, tabs, progress)
+        // the game's type decides the component language and the motifs; the artwork keeps the colours, the mood and the spacing
+        // a setting (samurai, mythology, souls-like ...) is more characteristic than a generic genre, so it wins close calls
+        val setting = setOf(Tag.SAMURAI, Tag.MYTHIC, Tag.SOULSLIKE, Tag.DARK_FANTASY, Tag.CYBERPUNK, Tag.SPACE, Tag.NAUTICAL, Tag.PIXEL)
+        val ranked = tags.entries.sortedByDescending { it.value + (if (it.key in setting) 0.1f else 0f) }
+        val primary = ranked.firstOrNull()?.takeIf { it.value >= 0.5f }
+        if (primary != null) {
+            val k = kit(primary.key)
+            val extra = ranked.drop(1).firstOrNull { it.value >= 0.5f && kit(it.key).ornaments.isNotEmpty() }?.let { kit(it.key).ornaments.first() }
+            val orn = (k.ornaments + listOfNotNull(extra)).distinctBy { it.kind }.take(3)
+            dna = dna.copy(shape = k.shape, border = k.border, rule = k.rule, texture = k.texture, ornaments = orn, type = k.type, tabs = k.tabs, progress = k.progress,
+                surface = k.surface ?: dna.surface, hero = k.hero ?: dna.hero)
+        }
+
+        val (dk, lt) = colors(p, paper)
+        return GeneratedDesign(Colors.readable(dk), Colors.readable(lt), dna, p, tags)
     }
 
-    /** Neutral identity: the app's own look (used while the cover is loading, when it is missing, or when analysis failed). */
-    fun fallback(key: String, name: String = ""): DesignDna {
-        val d = ThemeCore.dnaOf(ThemeCore.DEFAULT)
-        return DesignDna(DNA_SCHEMA, "game:$key", name.ifBlank { key }, DnaSource.GAME, "none", 0f, DnaHash.seed(key), true, d.light, d.dark, DnaStyles.PLAIN)
+    /** Colours: the dark set follows the artwork's dark tones and salient accent; the light set follows its real light tones when it has any. */
+    private fun colors(p: ArtProfile, paper: Float): Pair<ColorSet, ColorSet> {
+        val accent = p.accent ?: p.lightTone ?: p.darkTone ?: 0xFF7C6BFF.toInt()
+        val ah = hsl(accent)
+        val accentSat = ah[1].coerceIn(0.28f, 0.88f)
+        val dt = p.darkTone?.let { hsl(it) }
+        val groundH = if (dt != null && dt[1] > 0.08f) dt[0] else ah[0]
+        val groundS = ((dt?.get(1) ?: 0.2f) * 1.0f).coerceIn(0.06f, 0.6f)
+        val lightH = p.lightTone?.let { hsl(it)[0] } ?: groundH
+        val accent2 = p.accent2?.let { hsl(it) }
+        val a2 = when {
+            accent2 != null -> ColorMath.fromHsl(accent2[0], accent2[1].coerceIn(0.3f, 0.85f), 0.66f)
+            p.lightTone != null && paper >= 0.3f -> ColorMath.fromHsl(lightH, 0.35f, 0.86f)
+            else -> ColorMath.fromHsl(ah[0] + 38f, accentSat * 0.8f, 0.66f)
+        }
+        val acc = ColorMath.fromHsl(ah[0], accentSat, 0.64f)
+        val dark = ColorSet(
+            bg = ColorMath.fromHsl(groundH, groundS, 0.05f), bg2 = ColorMath.fromHsl(groundH, groundS, 0.085f), surface = ColorMath.fromHsl(groundH, groundS * 0.9f, 0.13f),
+            accent = acc, accent2 = a2, text = ColorMath.fromHsl(groundH, 0.2f, 0.95f), text2 = ColorMath.fromHsl(groundH, 0.15f, 0.72f),
+            border = ColorMath.fromHsl(groundH, groundS * 0.8f, 0.26f), progress = acc)
+        val light = if (p.lightTone != null && p.light >= 0.12f) {
+            val lh = hsl(p.lightTone); val ls = lh[1].coerceIn(0.1f, 0.6f)
+            val inkH = if (dt != null && dt[1] > 0.08f) dt[0] else ah[0]
+            val accL = ColorMath.fromHsl(ah[0], accentSat, 0.38f)
+            ColorSet(
+                bg = ColorMath.fromHsl(lh[0], ls, 0.945f), bg2 = ColorMath.fromHsl(lh[0], ls, 0.91f), surface = ColorMath.fromHsl(lh[0], ls * 0.7f, 0.975f),
+                accent = accL, accent2 = ColorMath.fromHsl(inkH, 0.12f, 0.24f), text = ColorMath.fromHsl(inkH, 0.25f, 0.09f), text2 = ColorMath.fromHsl(inkH, 0.15f, 0.33f),
+                border = ColorMath.fromHsl(lh[0], ls * 0.8f, 0.79f), progress = accL)
+        } else Colors.deriveLight(Colors.readable(dark))
+        return dark to light
     }
+
+    /** The finished theme: colours for both appearances + design layers. The id carries the title so it can be cached per game. */
+    fun toPreset(id: String, name: String, g: GeneratedDesign) = PresetSpec(id, name, g.dark, g.light, g.dna)
 }

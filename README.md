@@ -1,3 +1,68 @@
+# PS4 Download Monitor 6.12.1 (performance: smoother, no feature removed)
+
+- **Browser pages no longer run in the background.** Every saved tab used to get its own WebView and start loading at app start (all at once, on the UI thread), and every page (ads, video, timers) kept running while you were on Home / Downloads. Now a tab's WebView is created only when the tab is first shown (`BTab.web`), and pages are paused (`onPause` + `pauseTimers`) whenever the Browser screen is not visible or the app is in the background (`Browser.setShown` / `setActivityResumed`). Tabs, bookmarks, history of each page and saved tab addresses are unchanged.
+- **The 3-second service loop is off the UI thread.** `MonitorService` built notification cards (cover decode, RemoteViews, binder calls) on `Dispatchers.Main` every 3 s, which showed as a small hitch while the app was open with downloads running. It now runs on `Dispatchers.Default` (the monitor loop already called the same functions from IO threads).
+- **Fewer pointless refreshes.** `DownloadRepo.update` no longer stamps `updatedAt` and re-emits the list when a poll changes nothing (paused / waiting downloads were rewriting every record every poll, recomposing Home, Downloads and the bottom bar). The bottom-bar badge only follows the NUMBER of active downloads.
+- **Screen changes.** The default navigation cross-fade (700 ms, both screens alive) is now 140 ms in / 90 ms out.
+- **Theme objects are remembered.** `Root` and the game page rebuilt the colour scheme / tokens / design on every recomposition (the game page recomposed on every frame of its 350 ms colour animation); they are now `remember`ed by the theme.
+- **Less repeated work:** the games list is kept 10 min (was 60 s); banner-size artwork (<= 1280 px) is cached on disk like covers (was re-downloaded from the console on every app start); `Regex` / `SimpleDateFormat` are no longer built per call / per list row.
+- **Build:** new `release` build type (minified with R8, shrunk resources, not debuggable, signed with the same debug keystore so it installs over the old app) + `androidx.profileinstaller`. **Install the release APK (`./gradlew assembleRelease`)**: a debug APK runs Compose several times slower. `app/proguard-rules.pro` holds the (few) rules; if R8 reports a missing class, add `-dontwarn <package>.**` for it. versionCode 48.
+- NOT compiled here (no Android SDK) and not run on a phone. Static checks only: braces / parentheses balanced in every edited file, every renamed API (`BTab.web`, `setup(tab, w)`) searched for other uses.
+
+# PS4 Download Monitor 6.12.0 (profiles per kind of game, right game page, halos back)
+
+- **Corrected misreading of 6.11:** only the odd incomplete corner lines (brackets / flourishes on cards and tab bars) are gone. The halos, glow dots, glowing ball on progress bars, divider dots, starfield ring and circuit node rings are back as they were in 6.10 (the Decoration level still thins them).
+- **Three new game-type profiles** (21 now): SOULSLIKE (square corners, thin double rule, engraved diamond divider, Cinzel, god rays + motes, underline tabs, solid surfaces: the "austere / ancient" look for Elden Ring style games), MYTHIC (norse / greek mythology: carved rune glyphs in the header and in the divider, stone grain, cut tabs, tick progress), ACTION (hack and slash: claw scratches, slanted stripes, cut corners). A setting (samurai, mythology, souls-like ...) now wins close calls against a generic genre.
+- **Game type from the internet is more accurate:** the Wikidata genre labels (action role-playing, hack and slash, soulslike, association football, metroidvania ...) are mapped to types in addition to the article text, and both come from the same lookup that fills "About the game" (`GameWebInfo`), so the theme and the About section always agree.
+- **About the game describes THIS game:** the search returns up to six pages; the page is chosen by title match, not being a series / franchise article and a release year in the console's lifetime (God of War -> the 2018 game, not the series nor the 2005 game). Old cached entries are ignored (cache key v2) and cached designs are recomputed (analyser version 3).
+- **"null" fixed:** Android's org.json turns a JSON null into the text "null"; the series (and other optional fields) are read with `isNull` now.
+- Tests: 54 on a plain JVM (new: page choice, labels -> types, Elden Ring style profile, mythology profile, JSON null, guard for the incomplete corner lines). The Android app and the live lookups were NOT run here.
+
+# PS4 Download Monitor 6.10.0 (About the game, calmer decoration, smaller text)
+
+- **About the game** (game page > Details): short premise, genre, age rating (ESRB / PEGI), release date, developer, publisher, players, series and platforms from Wikipedia + Wikidata (`GameFacts.kt` parsing, `GameWebInfo` in GameGenre.kt fetching, `GameAboutUi.kt` UI). The premise keeps the setup and drops sentences about endings, deaths, twists, reception, sales and sequels (English and Arabic cues); Arabic uses the Arabic article when one exists. Cached 90 days per game and language (a miss 7 days), works from the cache offline, shows what is missing, links to the article, credits the sources. Needs the same online switch as the game type (Settings > Theme > "Look up game information online"); only the name is sent.
+- **Decoration level** (Settings > Theme): Minimal / Balanced (default) / Rich. Balanced shows at most two motifs, 20 % fainter, 30 % fainter textures and no texture on cards except paper; Minimal one motif, plain single borders. Shapes, tabs, fonts and dividers of the design never change. In-list separators are always plain hairlines now (the brush / pitch / stripe dividers stay for section titles). Tracking of display fonts halved, kits list their most characteristic motif first.
+- **Text size** (Settings > Theme): Small 88 % / Standard 94 % (new default) / Large 100 % (the previous size). Wide display faces are drawn smaller (Orbitron 88 %, Cinzel 95 %, Press Start 70 %), Bebas larger. `Lbl` (buttons, chips, tabs, labels) wraps to two lines instead of always cutting at one; shortcut tiles lost their arrow so their labels fit; server name, download title, storage / settings rows may take two lines.
+- Tests (47, all run on a plain JVM here with a real org.json build): `DecorationTest`, `GameFactsTest` (parsing, spoiler filter, dates, labels, storage), plus the earlier suites; the JSON round trips of every design ran for the first time. The Android app and the live Wikipedia / Wikidata calls were NOT run here.
+
+# PS4 Download Monitor 6.9.0 (Design DNA, phase 3: every screen follows the design)
+
+- Shared page components in `DnaKit.kt`: `dnaCard` (shape + fill + texture + border for rows and custom layouts), `ActionTile`, `StatusPill`, `PrimaryAction`, `SecondaryAction`, `DnaHeaderRule`; moved out of HomeUi so every screen uses the same ones.
+- Home: connection card, server panel, shortcuts, PS4 information, game list cards, Downloads (cards, header, tabs: pills / underline / cut / slanted according to the design, progress bar with the game's tint), Files, Browser (address field, tab and bookmark rows), Captures, package page, empty states and the bottom bar divider.
+- Status stays readable in every design: marker + text + colour (round marker in round designs, square in angular ones); connected / sleeping / unavailable keep their own green / amber / red.
+- The original look (default theme, hairline design) is unchanged: the new dividers draw nothing for it and the Downloads tab bar keeps Material tabs.
+- Static test `PageThemingTest`: screens may not contain hard-coded corner radii (an exception must be marked `fixed-shape`), the shared components are defined once, and every motif / divider / texture / progress / border the generator can pick is drawn by the kit. It caught two leftovers in the game list while writing it.
+- Not done: Material `Card`s of Settings / Server picker / Storage follow the design's corner shapes through the theme, but not its borders or textures.
+
+# PS4 Download Monitor 6.8.0 (Design DNA, phase 2.5: the game type decides the motifs; fixed JVM-signature clash in Theme.kt)
+
+- Problem fixed: designs were chosen only from the artwork, so many covers fell into the same few looks recoloured (a light football cover got the samurai paper look in green).
+- `GameTraits.kt` (pure): 18 game-type tags (sports, racing, fighting, shooter, horror, fantasy, dark fantasy, samurai, sci-fi, cyberpunk, space, pixel, anime, adventure, strategy, survival, family, nautical) from title keywords (offline) and from the first sentences of the game's encyclopedia entry (`GameGenre.kt`, online, optional: Settings > Theme > "Detect the game type online"; only the game name is sent, once, then cached 6 months).
+- `DnaGenerator.kt`: one kit per type (shape, border, divider, texture, motifs, fonts, tabs, progress); the artwork still decides colours (dark + light), mood and spacing. A strong type replaces the structural layers, a secondary type adds one motif.
+- `DnaKit.kt`: new procedural motifs (pitch lines, speed stripes, checker strip, hex grid, circuit, claw scratches, halftone, pixel blocks, starfield, contours, waves), slanted cards and tabs, striped progress, flourish corners, wave / pixel / pitch / stripe dividers, diagonal / hex / star / pixel textures. All drawn with Canvas, seeded, clipped to the header and capped.
+- Fonts (SIL OFL, licences in assets/licenses): Bebas Neue (sports / fighting / shooter / survival), Cinzel (fantasy / horror / strategy / nautical), Orbitron (racing / sci-fi / space / cyberpunk), Press Start 2P (pixel). Arabic text keeps the system face.
+- "Theme for this game" now shows the detected type and the measurements ("why this design").
+- Tests: `GenreTest` + `ArtAnalyzerTest` (21 tests, all pass on a plain JVM here; the Android app and the online lookup were NOT run here).
+
+# PS4 Download Monitor 6.7.0 (Design DNA, phase 2: local artwork analyser)
+
+- `ArtAnalyzer.kt` (pure Kotlin): measures an artwork on a 160 px copy: lightness / chroma distribution, negative space, edge density, glow, the salient accent hues (chroma-weighted, so a small gold band or fire counts) and the ground tones. Six style scores (PAPER, LUMINOUS, DRAMATIC, NEON, MINIMAL, SOFT) are built only from hue-independent measurements.
+- `DnaGenerator.kt` (pure Kotlin): decides every design layer separately from those scores (corners, border, divider, surface, texture, ornaments, fonts, spacing, header, tabs, progress) and builds a dark and a light colour set (the light one follows the artwork's real light tones, e.g. ivory paper, when it has them).
+- The game page now analyses banner + cover together (off the main thread), caches the result in memory and in storage (key = artwork fingerprint + analyser version, so it is recomputed only when the artwork or the analyser changes). Dynamic mode uses it; any game can pick "From this game's artwork" in Details > Theme for this game, see the measurements ("why this design") and save the design as a profile.
+- Limits: no motif recognition (leaves, waves, chains) and no logo-font recognition locally; those come from presets, imported JSON or the future visual layer. Fonts are system serif / sans / condensed.
+- Tests: `ArtAnalyzerTest` (real covers in `src/test/resources/covers`) - 12 tests run on a plain JVM here, all pass; the Android app itself was not built here.
+
+# PS4 Download Monitor 6.6.0 (Design DNA, phase 1; 2 compile errors fixed after the first CI run)
+
+## Design DNA
+- A theme is now colours (a dark set + an optional hand-made light set) **plus independent design layers** (`DnaCore.kt`): corners, border, divider, surface, texture, ornaments, typography, spacing, game-header composition, tab style, progress style.
+- **Appearance (System / Light / Dark) is independent of the theme.** Every preset / profile / game theme has a dark and a light set (hand-made for Ghost of Tsushima and Hollow Knight, derived automatically for the others and for user profiles). Settings > Appearance and Settings > Theme both expose it.
+- `DnaKit.kt`: `DnaSurface` (Panel), `DnaRule`, `DnaProgress`, `SegmentedTabs`, `SectionHeader`, `dnaShapes`, `dnaTypography`, procedural texture / ornaments (seeded, cached, capped). `DnaJson.kt`: strict storage / import format.
+- New presets: **Ghost of Tsushima** (ivory paper, ink, muted gold; square double-ruled cards, brush dividers and progress, framed header with seigaiha band and ginkgo leaves) and **Hollow Knight** (abyssal blue / pale bone; large soft corners with a glowing hairline, glass surfaces, spores and light shafts, glow progress).
+- Per game: game page > Details > "Theme for this game" assigns any preset or profile to that game only. Editor: colours per appearance, contrast warnings, and every design layer can be mixed freely or copied from another theme.
+- Not yet done (phase 2/3): local artwork analyser that produces a DNA from a cover, optional vision-model layer, bundled fonts (system serif / sans only for now), restyling of Home / Downloads / Browser layouts beyond Panel, shapes and colours.
+- Tests: `app/src/test/.../DnaTest.kt` (JUnit). The colour / structure tests were run on a plain JVM here; the JSON tests were not run (no org.json here). The Android app was NOT built.
+
 # PS4 Download Monitor 6.1.0 (UI redesign, not compiled)
 
 ## Theme system
@@ -337,11 +402,3 @@ artwork scan, history screen, auto-rename/auto-install, adoption toggle, "stop m
   setting "Alert me when a download is interrupted"); one grouped notification per finished download.
 - **Cover colours:** cards, progress bars and the detail screen take the dominant colour of the game's cover.
 - The custom server retries transient failures forever (only consecutive failures count), so downloads no longer stop and wait for "Resume".
-
-## Design DNA (v6.5)
-Each game cover is analysed offline (`CoverAnalyzer`) into a typed `DesignDna` (palette roles for light and dark, shape, ornament, texture, atmosphere, typography, motion, confidence, schema version). `DnaGenerator` is data-driven (no per-title branches); `DnaRules` enforces WCAG contrast (text ≥ 4.5:1, graphics ≥ 3:1). Appearance (system/light/dark) is independent of game identity (`LookResolver`). DNA and themes export/import as versioned, validated JSON (`DnaJson`); v1 profiles are migrated with a backup, and unreadable entries are quarantined, never deleted. Effects level (off / still / animated) is in Appearance settings; animation respects the system animator scale and battery saver.
-
-Not implemented: remote vision AI (would need your own backend; no key is embedded). Analysis uses the icon0 cover only.
-
-## Build
-No Gradle wrapper is committed. CI (`.github/workflows/android.yml`) runs unit tests and `assembleDebug`, then uploads `PS4Monitor-debug.apk`, `build-logs` and `test-reports`. Locally: Gradle 8.9 + Android SDK 34, `gradle testDebugUnitTest assembleDebug`.

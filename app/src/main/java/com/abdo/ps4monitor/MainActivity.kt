@@ -25,6 +25,11 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleShare(intent) }
@@ -44,27 +49,44 @@ class MainActivity : ComponentActivity() {
         setContent { Root() }
     }
     override fun onStop() { super.onStop(); Browser.save() }
+    override fun onResume() { super.onResume(); Browser.setActivityResumed(true) }
+    override fun onPause() { super.onPause(); Browser.setActivityResumed(false) }
 }
 
 @Composable fun Root() {
     val ctx = LocalContext.current
+    val mode = ThemeEngine.mode
     val sysDark = isSystemInDarkTheme()
-    // appearance (system / light / dark) and identity (default / preset / custom / game) are independent: the Appearance setting applies to every theme
-    val dark = LookResolver.isDark(Store.theme.intValue, sysDark)
-    val look = ThemeEngine.look(dark)
-    val phone = if (ThemeEngine.mode == ThemeMode.DEFAULT && Store.dynamic.value && Build.VERSION.SDK_INT >= 31) (if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)) else null
-    CompositionLocalProvider(LocalLayoutDirection provides if (Lang.isAr) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-        DnaTheme(look, ThemeEngine.fx, phone) {
-            val cs = MaterialTheme.colorScheme
-            val view = LocalView.current
-            SideEffect {
-                val w = (view.context as? Activity)?.window ?: return@SideEffect
-                w.statusBarColor = cs.surface.toArgb(); w.navigationBarColor = cs.surfaceContainer.toArgb()
-                WindowCompat.getInsetsController(w, view).apply { isAppearanceLightStatusBars = !dark; isAppearanceLightNavigationBars = !dark }
-            }
+    val dark = when (Store.theme.intValue) { 1 -> false; 2 -> true; else -> sysDark }       // appearance: independent of the theme
+    // App default (and Dynamic, whose non-game screens use the default) keeps the old Appearance options (system / light / dark, phone colours).
+    // Presets, custom profiles and assigned themes follow the appearance too: each has a dark and a light colour set (hand-made or derived).
+    val pagesDefault = mode == ThemeMode.DEFAULT || mode == ThemeMode.DYNAMIC
+    val legacy = pagesDefault && (Store.theme.intValue == 1 || (Store.dynamic.value && Build.VERSION.SDK_INT >= 31) || (Store.theme.intValue == 0 && !sysDark))
+    val appTheme = ThemeEngine.base
+    val shown = ThemeEngine.resolve(appTheme, dark)                  // the theme's colours in the current appearance
+    val dynamicOn = Store.dynamic.value
+    // remembered: a NEW ColorScheme object makes every composable that reads the theme recompose, so it must only change when the theme does
+    val cs = remember(legacy, dynamicOn, dark, shown) {
+        when {
+            legacy && dynamicOn && Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+            legacy && !dark -> lightColorScheme(primary = Color(0xFF5B3FD6), secondary = Color(0xFF3A5BA0), tertiary = Color(0xFF7D5260))
+            else -> ThemeEngine.scheme(shown)
+        }
+    }
+    val lightUi = if (legacy) !dark else ColorMath.luminance(shown.bg) > 0.4
+    val decoration = ThemeEngine.decoration
+    val dna = remember(pagesDefault, shown, decoration) { (if (pagesDefault) Dna.CLASSIC else shown.dna).restrained(decoration) }
+    val tokens = remember(legacy, dark, appTheme, shown) { ThemeEngine.tokens(if (legacy && !dark) ThemeEngine.resolve(appTheme, false) else shown) }
+    val view = LocalView.current
+    SideEffect {
+        val w = (view.context as? Activity)?.window ?: return@SideEffect
+        w.statusBarColor = cs.surface.toArgb(); w.navigationBarColor = cs.surfaceContainer.toArgb()
+        WindowCompat.getInsetsController(w, view).apply { isAppearanceLightStatusBars = lightUi; isAppearanceLightNavigationBars = lightUi }
+    }
+    CompositionLocalProvider(LocalLayoutDirection provides if (Lang.isAr) LayoutDirection.Rtl else LayoutDirection.Ltr, LocalTokens provides tokens, LocalDna provides dna) {
+        MaterialTheme(colorScheme = cs, typography = dnaTypography(dna), shapes = dnaShapes(dna)) {
             Surface(Modifier.fillMaxSize(), color = cs.surface) {
-                Box(Modifier.fillMaxSize()) { DnaBackdrop(Modifier.fillMaxSize()); AppNav() }
-                LaunchedEffect(Unit) { Tour.startIfFirstRun() }; TourOverlay()
+                Box(Modifier.fillMaxSize().dnaTexture(dna, cs.onSurface, cs.primary)) { AppNav(); LaunchedEffect(Unit) { Tour.startIfFirstRun() }; TourOverlay() }
             }
         }
     }
@@ -78,11 +100,10 @@ private val TABS = listOf(Triple("home", R.drawable.ic_home, "Home" to "الرئ
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val topLevel = TABS.any { it.first == route }
-    val active by DownloadRepo.all.collectAsState()
-    val activeCount = active.count { it.state.active }
-    Scaffold(containerColor = if (dnaDecorated()) Color.Transparent else MaterialTheme.colorScheme.background, bottomBar = {
-        if (topLevel) Column { if (dnaDecorated()) DnaDivider(Modifier.padding(horizontal = 16.dp))
-        NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp) {
+    val activeCount by remember { DownloadRepo.all.map { l -> l.count { it.state.active } }.distinctUntilChanged() }
+        .collectAsState(initial = DownloadRepo.all.value.count { it.state.active })
+    Scaffold(containerColor = Color.Transparent, bottomBar = {
+        if (topLevel) Column { DnaHeaderRule(); NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp) {
             TABS.forEach { (r, icon, label) ->
                 NavigationBarItem(selected = route == r, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary, indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant, unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant), label = { Lbl(tr(label.first, label.second), style = MaterialTheme.typography.labelMedium) },
                     icon = { BadgedBox(badge = { if (r == "downloads" && activeCount > 0) Badge { Text("$activeCount") } }) { Ico(icon) } },
@@ -90,7 +111,9 @@ private val TABS = listOf(Triple("home", R.drawable.ic_home, "Home" to "الرئ
             }
         } }
     }) { pad ->
-        NavHost(nav, startDestination = "home", modifier = Modifier.padding(pad)) {
+        NavHost(nav, startDestination = "home", modifier = Modifier.padding(pad),
+            enterTransition = { fadeIn(tween(140)) }, exitTransition = { fadeOut(tween(90)) },
+            popEnterTransition = { fadeIn(tween(140)) }, popExitTransition = { fadeOut(tween(90)) }) {
             composable("home") { HomeScreen(nav) }
             composable("browser") { BrowserScreen() }
             composable("downloads") { DownloadsScreen(nav) }

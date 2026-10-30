@@ -123,7 +123,8 @@ object PkgStore {
     private lateinit var root: File
     private val mem = object : LruCache<String, Bitmap>(32 * 1024 * 1024) { override fun sizeOf(key: String, value: Bitmap) = value.byteCount }
     fun init(c: Context) { root = File(c.filesDir, "pkg").apply { mkdirs() } }
-    private fun safe(k: String) = k.replace(Regex("[^A-Za-z0-9_.-]"), "_")
+    private val UNSAFE = Regex("[^A-Za-z0-9_.-]")
+    private fun safe(k: String) = k.replace(UNSAFE, "_")
     private fun dir(key: String, create: Boolean = false) = File(root, safe(key)).also { if (create) it.mkdirs() }
     fun key(ps4Id: String, path: String, size: Long, mtime: Long = 0): String =
         "f_" + MessageDigest.getInstance("SHA-1").digest("$ps4Id|$path|$size|$mtime".toByteArray()).joinToString("") { "%02x".format(it) }.take(24)

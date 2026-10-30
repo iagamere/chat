@@ -29,7 +29,7 @@ import kotlinx.coroutines.withContext
     Card(onClick = onClick, Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Ico(icon, 24.dp, MaterialTheme.colorScheme.primary)
-            Column(Modifier.weight(1f)) { Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis); if (sub.isNotEmpty()) Dim(sub, maxLines = 2) }
+            Column(Modifier.weight(1f)) { Text(title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis); if (sub.isNotEmpty()) Dim(sub, maxLines = 3) }
             Ico(R.drawable.ic_arrow_forward, 20.dp, MaterialTheme.colorScheme.outline)
         }
     }
@@ -47,11 +47,11 @@ import kotlinx.coroutines.withContext
         item { Panel {
             SectionTitle(tr("Language", "اللغة"))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(0 to tr("Phone", "الهاتف"), 1 to "English", 2 to "العربية").forEach { (i, t) -> FilterChip(Lang.mode == i, { Store.setLang(i) }, label = { Lbl(t) }) } }
-            SectionTitle(tr("Appearance", "المظهر"))
+            SectionTitle(tr("Appearance (light / dark)", "المظهر (فاتح / داكن)"))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(tr("System", "النظام"), tr("Light", "فاتح"), tr("Dark", "داكن")).forEachIndexed { i, t -> FilterChip(Store.theme.intValue == i, { Store.setTheme(i) }, label = { Lbl(t) }) } }
-            Dim(tr("Applies to every theme and game identity.", "يُطبَّق على كل الثيمات وهويات الألعاب."))
+            Dim(tr("Applies to every theme (Settings > Theme).", "ينطبق على كل الثيمات (الإعدادات ← الثيم)."))
             if (android.os.Build.VERSION.SDK_INT >= 31) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) { Text(tr("Use phone colours", "استخدام ألوان الهاتف")); Dim(tr("Follows your wallpaper / system accent colour (App default theme only)", "يتبع لون الهاتف الأساسي (للثيم الافتراضي فقط)")) }
+                Column(Modifier.weight(1f)) { Text(tr("Use phone colours", "استخدام ألوان الهاتف")); Dim(tr("Follows your wallpaper / system accent colour", "يتبع لون الهاتف الأساسي")) }
                 Switch(Store.dynamic.value, { Store.setDynamic(it) })
             }
         } }
@@ -205,9 +205,8 @@ import kotlinx.coroutines.withContext
     val name = when (ThemeEngine.mode) { ThemeMode.DYNAMIC -> tr("Game theme", "ثيم اللعبة"); ThemeMode.DEFAULT -> tr("App default", "الافتراضي"); else -> t.name }
     Card(onClick = onClick, Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            val sch = ThemeCore.schemeOf(t, LookResolver.isDark(Store.theme.intValue, androidx.compose.foundation.isSystemInDarkTheme()))
             Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
-                listOf(sch.bg2, sch.card, sch.primary, sch.secondary).forEach { Box(Modifier.size(26.dp).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.ui.graphics.Color(it)).border(1.5.dp, MaterialTheme.colorScheme.surface, androidx.compose.foundation.shape.CircleShape)) }
+                listOf(t.bg2, t.surface, t.accent, t.accent2).forEach { Box(Modifier.size(26.dp).clip(androidx.compose.foundation.shape.CircleShape).background(androidx.compose.ui.graphics.Color(it)).border(1.5.dp, MaterialTheme.colorScheme.surface, androidx.compose.foundation.shape.CircleShape)) }
             }
             Column(Modifier.weight(1f)) {
                 Text(tr("Theme", "الثيم"), fontWeight = FontWeight.SemiBold)

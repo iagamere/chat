@@ -13,7 +13,8 @@ import kotlinx.coroutines.*
 
 /** Keeps the process alive and hosts monitoring. All state lives in DownloadMonitor / DownloadRepo, not in the UI. */
 class MonitorService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // not Dispatchers.Main: every 3 s this loop builds notification cards (cover decode, RemoteViews, binder calls); on the UI thread that was a periodic hitch
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var wl: PowerManager.WakeLock? = null
     private var wf: WifiManager.WifiLock? = null
     private var cm: ConnectivityManager? = null
